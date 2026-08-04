@@ -45,7 +45,7 @@ export function WarehouseControls({ activeView }: { activeView: string }) {
         exceptionApprovedBy: lossChecks.exceptionApproved ? "dummy-exception-id" : null,
         wetCoffeeJointApproved: lossChecks.jointApprovalAttached
       });
-    } catch (err: any) {
+    } catch {
       // Clean fallback display if database environment is unconfigured
     }
     setLossRecords((current) => [{ id, lot: "HYK/GEL/2026/0040", loss: lossKg, percent: lossResult.percent, status: "APPROVED" }, ...current]);
@@ -64,7 +64,7 @@ export function WarehouseControls({ activeView }: { activeView: string }) {
         quantity: printQuantity,
         approvedBy: "dummy-approver-id"
       });
-    } catch (err: any) {
+    } catch {
       // Clean fallback display
     }
     setPrintOrders((current) => [{ id, client, quantity: printQuantity, rate: printQuote.rate, total: printQuote.total, status: "DRAFT" }, ...current]);
@@ -91,7 +91,7 @@ export function WarehouseControls({ activeView }: { activeView: string }) {
         unitCost: dieselUnitCost,
         approvedBy: "dummy-approver-id"
       });
-    } catch (err: any) {
+    } catch {
       // Clean fallback display
     }
     setGeneratorRequests((current) => [{ id, client: "Guji Specialty Coffee PLC", order: "PRO-2026-0014", litres: dieselLitres, cost: actualCost, status: "FINANCE_REVIEWED" }, ...current]);

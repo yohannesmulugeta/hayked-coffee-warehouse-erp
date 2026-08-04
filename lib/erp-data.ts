@@ -671,4 +671,44 @@ export async function exportAccountingGeneralLedger(periodStart: string, periodE
   return data as Array<{ account_code: string; account_name: string; debit_etb: number; credit_etb: number; entry_count: number }>;
 }
 
+export type EligibleProcessingLot = {
+  lot_id: string;
+  lot_number: string;
+  client_id: string;
+  lot_category: "ARRIVAL" | "ACCEPTED_PROCESSED" | "CLIENT_REJECT" | "HAYKED_BYPRODUCT" | "OTHER";
+  coffee_type: string;
+  grade: string;
+  section: string;
+  bag_count: number;
+  quantity_kg: number;
+  reserved_kg: number;
+  available_kg: number;
+  available_bags: number;
+  receipt_id?: string | null;
+  parent_lot_id?: string | null;
+  source_processing_order_id?: string | null;
+  status: string;
+  created_at: string;
+};
+
+export async function listEligibleProcessingLots(clientId: string): Promise<EligibleProcessingLot[]> {
+  if (!clientId) return [];
+  const { data, error } = await createSupabaseClient().rpc("list_eligible_processing_lots", {
+    p_client_id: clientId,
+  });
+  if (error) throw new Error(friendlyDatabaseError(error, "Failed to load eligible processing lots for client."));
+  return (data ?? []) as EligibleProcessingLot[];
+}
+
+export async function validateProcessingSourceLot(lotId: string, clientId: string, requestedKg: number): Promise<boolean> {
+  const { data, error } = await createSupabaseClient().rpc("validate_processing_source_lot", {
+    p_lot_id: lotId,
+    p_client_id: clientId,
+    p_requested_kg: requestedKg,
+  });
+  if (error) throw new Error(friendlyDatabaseError(error, "Source lot validation failed."));
+  return Boolean(data);
+}
+
+
 

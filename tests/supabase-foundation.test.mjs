@@ -92,3 +92,28 @@ test("administration exposes auth emails only through an admin RPC", () => {
   assert.match(sql, /private\.require_role\('system_admin'\)/i);
   assert.match(sql, /processing_request_lines_request_lot_unique_idx/i);
 });
+
+test("processing lot eligibility migration adds lot_category, queries eligible lots, and blocks invalid sources", () => {
+  const migration = readdirSync("supabase/migrations").find((name) => name.endsWith("_processing_lot_eligibility.sql"));
+  assert.ok(migration);
+  const sql = readFileSync(`supabase/migrations/${migration}`, "utf8");
+  assert.match(sql, /add column if not exists lot_category text/i);
+  assert.match(sql, /function public\.list_eligible_processing_lots/i);
+  assert.match(sql, /function public\.validate_processing_source_lot/i);
+  assert.match(sql, /ARRIVAL.*CLIENT_REJECT.*ACCEPTED_PROCESSED/i);
+  assert.match(sql, /Hayked-owned byproduct lots cannot be used/i);
+  assert.doesNotMatch(sql, /service_role/i);
+});
+
+test("corrective migration removes unsafe default and enforces allowlist in start_processing_order_with_intake", () => {
+  const migration = readdirSync("supabase/migrations").find((name) => name.endsWith("_remove_unsafe_lot_category_default.sql"));
+  assert.ok(migration);
+  const sql = readFileSync(`supabase/migrations/${migration}`, "utf8");
+  assert.match(sql, /alter column lot_category drop default/i);
+  assert.match(sql, /function public\.start_processing_order_with_intake/i);
+  assert.match(sql, /for update/i);
+  assert.match(sql, /Ineligible source lot category/i);
+  assert.doesNotMatch(sql, /service_role/i);
+});
+
+

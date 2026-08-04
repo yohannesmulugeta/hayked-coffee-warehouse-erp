@@ -42,3 +42,23 @@ test("processing requests require approval before joining the queue", () => {
   assert.equal(queueProcessingRequest(approved, "QUE-1").queuedAs, "QUE-1");
   assert.equal(validateProcessingRequest({ ...draft, approver: " aster kebede " }).valid, false);
 });
+
+test("source lot category classification uses a strict positive allowlist", () => {
+  const allowedCategories = new Set(["ARRIVAL", "CLIENT_REJECT", "ACCEPTED_PROCESSED"]);
+  const isCategoryEligible = (cat) => Boolean(cat) && allowedCategories.has(cat);
+
+  // Positive allowlist assertions
+  assert.equal(isCategoryEligible("ARRIVAL"), true);
+  assert.equal(isCategoryEligible("CLIENT_REJECT"), true);
+  assert.equal(isCategoryEligible("ACCEPTED_PROCESSED"), true);
+
+  // Strict rejection assertions
+  assert.equal(isCategoryEligible("HAYKED_BYPRODUCT"), false);
+  assert.equal(isCategoryEligible("OTHER"), false);
+  assert.equal(isCategoryEligible(null), false);
+  assert.equal(isCategoryEligible(undefined), false);
+  assert.equal(isCategoryEligible("FUTURE_CATEGORY"), false);
+});
+
+
+
