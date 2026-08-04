@@ -1,0 +1,122 @@
+- main [ref=e57]:
+  - complementary [ref=e58]:
+    - generic "Temporary Hayked logo placeholder" [ref=e60]:
+      - generic [ref=e61]: H
+      - generic [ref=e62]:
+        - strong [ref=e63]: HAYKED
+        - generic [ref=e64]: COFFEE WAREHOUSE ERP
+    - navigation "Main navigation" [ref=e65]:
+      - generic [ref=e66]:
+        - paragraph [ref=e67]: OVERVIEW
+        - button "Dashboard" [ref=e68] [cursor=pointer]
+      - generic [ref=e75]:
+        - paragraph [ref=e76]: OPERATIONS
+        - button "Clients" [ref=e77] [cursor=pointer]
+        - button "Agreements" [ref=e85] [cursor=pointer]
+        - button "Representatives" [ref=e92] [cursor=pointer]
+        - button "Warehouse Receipts" [ref=e100] [cursor=pointer]
+        - button "Coffee Lots" [ref=e108] [cursor=pointer]
+        - button "Storage Loss" [ref=e115] [cursor=pointer]
+        - button "Processing 4" [ref=e121] [cursor=pointer]:
+          - generic [ref=e132]: Processing
+          - generic [ref=e133]: "4"
+        - button "Dispatch" [ref=e136] [cursor=pointer]
+        - button "Ownership Transfers" [ref=e145] [cursor=pointer]
+        - button "Bag Control" [ref=e152] [cursor=pointer]
+        - button "Labour" [ref=e159] [cursor=pointer]
+        - button "Generator Requests" [ref=e167] [cursor=pointer]
+      - generic [ref=e174]:
+        - paragraph [ref=e175]: MANAGEMENT
+        - button "Finance" [ref=e176] [cursor=pointer]
+        - button "Arrears Cases" [ref=e183] [cursor=pointer]
+        - button "Reports" [ref=e189] [cursor=pointer]
+        - button "Documents" [ref=e196] [cursor=pointer]
+        - button "Approvals 3" [ref=e203] [cursor=pointer]:
+          - generic [ref=e208]: Approvals
+          - generic [ref=e209]: "3"
+        - button "Audit History" [ref=e212] [cursor=pointer]
+        - button "Administration" [ref=e219] [cursor=pointer]
+    - generic [ref=e226]:
+      - generic [ref=e227]: HW
+      - generic [ref=e228]:
+        - strong [ref=e229]: Main Warehouse
+        - generic [ref=e230]: Gelancho, Addis Ababa
+    - generic [ref=e231]:
+      - text: All systems operational
+      - generic [ref=e233]: v0.1
+  - generic [ref=e234]:
+    - generic [ref=e235]:
+      - generic [ref=e236]:
+        - generic [ref=e237]: Operations
+        - strong [ref=e240]: Agreements
+      - generic [ref=e241]:
+        - textbox [ref=e246]:
+          - /placeholder: Search GRN, lot, client or order...
+        - button "Approvals" [ref=e247] [cursor=pointer]:
+          - generic [ref=e252]: "3"
+        - button "Notifications" [ref=e253] [cursor=pointer]:
+          - generic [ref=e257]: "4"
+        - button "MT Meron Tadesse System Administrator" [ref=e258] [cursor=pointer]:
+          - generic [ref=e259]: MT
+          - generic [ref=e260]:
+            - strong [ref=e261]: Meron Tadesse
+            - generic [ref=e262]: System Administrator
+    - generic [ref=e467]:
+      - generic [ref=e468]:
+        - generic [ref=e469]:
+          - generic [ref=e470]: AGREEMENT CONTROL
+          - heading "Client agreements" [level=1] [ref=e518]
+          - paragraph [ref=e472]: Only active, effective agreements can authorize a new warehouse receipt.
+        - button "New agreement" [active] [ref=e519] [cursor=pointer]
+      - generic [ref=e476]:
+        - generic [ref=e477]:
+          - generic [ref=e478]: Agreement
+          - generic [ref=e479]: Client
+          - generic [ref=e480]: Source
+          - generic [ref=e481]: Effective
+          - generic [ref=e482]: Expiry
+          - generic [ref=e520]: Status
+        - generic [ref=e521]:
+          - generic [ref=e522]: AGR-2026-011
+          - generic [ref=e523]: Guji Specialty Coffee PLC
+          - generic [ref=e524]: 001/2018
+          - generic [ref=e525]: 2026-01-01
+          - generic [ref=e526]: 2026-12-31
+          - generic [ref=e527]: ACTIVE
+      - form "Add Client Agreement" [ref=e529]:
+        - generic [ref=e530]:
+          - generic [ref=e531]:
+            - generic [ref=e532]: CLIENT ONBOARDING
+            - heading "Add Client Agreement" [level=2] [ref=e533]
+            - paragraph [ref=e534]: Master records remain available to all authorized warehouse workflows.
+          - button "Close form" [ref=e535] [cursor=pointer]
+        - generic [ref=e539]:
+          - generic [ref=e540]:
+            - text: Client
+            - combobox "Client" [ref=e541]:
+              - option "Select client" [disabled] [selected]
+              - option "CL-0015 - Guji Specialty Coffee PLC"
+          - generic [ref=e542]:
+            - text: Agreement number
+            - textbox "Agreement number" [ref=e543]:
+              - /placeholder: AGR-2026-012
+          - generic [ref=e544]:
+            - text: Status
+            - combobox "Status" [ref=e545]:
+              - option "DRAFT" [selected]
+              - option "ACTIVE"
+          - generic [ref=e546]:
+            - text: Effective date
+            - textbox "Effective date" [ref=e547]: 2026-08-01
+          - generic [ref=e548]:
+            - text: Expiry date
+            - textbox "Expiry date" [ref=e549]
+          - generic [ref=e550]:
+            - text: Default bag weight (kg)
+            - spinbutton "Default bag weight (kg)" [ref=e551]: "60"
+          - generic [ref=e552]:
+            - text: Tariff version
+            - textbox "Tariff version" [ref=e553]: TV-001
+        - generic [ref=e554]:
+          - button "Cancel" [ref=e555] [cursor=pointer]
+          - button "Save record" [ref=e556] [cursor=pointer]

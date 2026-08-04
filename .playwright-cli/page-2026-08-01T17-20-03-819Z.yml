@@ -1,0 +1,123 @@
+- main [ref=e57]:
+  - complementary [ref=e58]:
+    - generic "Temporary Hayked logo placeholder" [ref=e60]:
+      - generic [ref=e61]: H
+      - generic [ref=e62]:
+        - strong [ref=e63]: HAYKED
+        - generic [ref=e64]: COFFEE WAREHOUSE ERP
+    - navigation "Main navigation" [ref=e65]:
+      - generic [ref=e66]:
+        - paragraph [ref=e67]: OVERVIEW
+        - button "Dashboard" [ref=e68] [cursor=pointer]
+      - generic [ref=e75]:
+        - paragraph [ref=e76]: OPERATIONS
+        - button "Clients" [ref=e77] [cursor=pointer]
+        - button "Agreements" [ref=e85] [cursor=pointer]
+        - button "Representatives" [ref=e92] [cursor=pointer]
+        - button "Warehouse Receipts" [active] [ref=e100] [cursor=pointer]
+        - button "Coffee Lots" [ref=e108] [cursor=pointer]
+        - button "Storage Loss" [ref=e115] [cursor=pointer]
+        - button "Processing 4" [ref=e121] [cursor=pointer]:
+          - generic [ref=e132]: Processing
+          - generic [ref=e133]: "4"
+        - button "Dispatch" [ref=e136] [cursor=pointer]
+        - button "Ownership Transfers" [ref=e145] [cursor=pointer]
+        - button "Bag Control" [ref=e152] [cursor=pointer]
+        - button "Labour" [ref=e159] [cursor=pointer]
+        - button "Generator Requests" [ref=e167] [cursor=pointer]
+      - generic [ref=e174]:
+        - paragraph [ref=e175]: MANAGEMENT
+        - button "Finance" [ref=e176] [cursor=pointer]
+        - button "Arrears Cases" [ref=e183] [cursor=pointer]
+        - button "Reports" [ref=e189] [cursor=pointer]
+        - button "Documents" [ref=e196] [cursor=pointer]
+        - button "Approvals 3" [ref=e203] [cursor=pointer]:
+          - generic [ref=e208]: Approvals
+          - generic [ref=e209]: "3"
+        - button "Audit History" [ref=e212] [cursor=pointer]
+        - button "Administration" [ref=e219] [cursor=pointer]
+    - generic [ref=e226]:
+      - generic [ref=e227]: HW
+      - generic [ref=e228]:
+        - strong [ref=e229]: Main Warehouse
+        - generic [ref=e230]: Gelancho, Addis Ababa
+    - generic [ref=e231]:
+      - text: All systems operational
+      - generic [ref=e233]: v0.1
+  - generic [ref=e234]:
+    - generic [ref=e235]:
+      - generic [ref=e236]:
+        - generic [ref=e237]: Operations
+        - strong [ref=e240]: Warehouse Receipts
+      - generic [ref=e241]:
+        - textbox [ref=e246]:
+          - /placeholder: Search GRN, lot, client or order...
+        - button "Approvals" [ref=e247] [cursor=pointer]:
+          - generic [ref=e252]: "3"
+        - button "Notifications" [ref=e253] [cursor=pointer]:
+          - generic [ref=e257]: "4"
+        - button "MT Meron Tadesse System Administrator" [ref=e258] [cursor=pointer]:
+          - generic [ref=e259]: MT
+          - generic [ref=e260]:
+            - strong [ref=e261]: Meron Tadesse
+            - generic [ref=e262]: System Administrator
+    - generic [ref=e467]:
+      - generic [ref=e600]:
+        - generic [ref=e601]:
+          - generic [ref=e602]: ARRIVAL COFFEE
+          - heading "Warehouse receipts" [level=1] [ref=e603]
+          - paragraph [ref=e604]: Draft, approve, and post each GRN exactly once.
+        - button "New GRN" [ref=e605] [cursor=pointer]
+      - generic [ref=e607]:
+        - generic [ref=e613]:
+          - strong [ref=e614]: 1. Draft
+          - generic [ref=e615]: Record and validate
+        - generic [ref=e623]:
+          - strong [ref=e624]: 2. Submit
+          - generic [ref=e625]: Agreement and representative
+        - generic [ref=e632]:
+          - strong [ref=e633]: 3. Approve
+          - generic [ref=e634]: Independent manager
+        - generic [ref=e642]:
+          - strong [ref=e643]: 4. Post
+          - generic [ref=e644]: Create lot and stock
+      - generic [ref=e645]:
+        - article [ref=e646]:
+          - generic [ref=e650]:
+            - text: Posted receipts
+            - strong [ref=e651]: "1"
+        - article [ref=e652]:
+          - generic [ref=e657]:
+            - text: Awaiting approval
+            - strong [ref=e658]: "0"
+        - article [ref=e659]:
+          - generic [ref=e664]:
+            - text: Posted net weight
+            - strong [ref=e665]: 19,200 kg
+      - generic [ref=e667]:
+        - generic [ref=e668]:
+          - generic [ref=e669]: GRN
+          - generic [ref=e670]: Client
+          - generic [ref=e671]: Coffee
+          - generic [ref=e672]: Quantity
+          - generic [ref=e673]: Received
+          - generic [ref=e674]: Status
+          - generic [ref=e675]: Action
+        - generic [ref=e676]:
+          - generic [ref=e677]:
+            - strong [ref=e678]: GRN-2026-0040
+            - generic [ref=e679]: "-"
+          - generic [ref=e680]:
+            - strong [ref=e681]: Guji Specialty Coffee PLC
+            - generic [ref=e682]: Aster Kebede
+          - generic [ref=e683]:
+            - text: Unwashed / UG -
+            - generic [ref=e684]: "-"
+          - generic [ref=e685]:
+            - text: 320 bags
+            - generic [ref=e686]: 19,200 kg
+          - generic [ref=e687]: 2026-08-01 05:30
+          - generic [ref=e688]: POSTED
+          - generic [ref=e690]:
+            - button "Lot tag" [ref=e691] [cursor=pointer]
+            - button "Reverse posted GRN" [ref=e694] [cursor=pointer]

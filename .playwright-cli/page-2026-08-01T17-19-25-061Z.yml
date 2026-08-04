@@ -1,0 +1,119 @@
+- main [ref=e57]:
+  - complementary [ref=e58]:
+    - generic "Temporary Hayked logo placeholder" [ref=e60]:
+      - generic [ref=e61]: H
+      - generic [ref=e62]:
+        - strong [ref=e63]: HAYKED
+        - generic [ref=e64]: COFFEE WAREHOUSE ERP
+    - navigation "Main navigation" [ref=e65]:
+      - generic [ref=e66]:
+        - paragraph [ref=e67]: OVERVIEW
+        - button "Dashboard" [ref=e68] [cursor=pointer]
+      - generic [ref=e75]:
+        - paragraph [ref=e76]: OPERATIONS
+        - button "Clients" [ref=e77] [cursor=pointer]
+        - button "Agreements" [ref=e85] [cursor=pointer]
+        - button "Representatives" [ref=e92] [cursor=pointer]
+        - button "Warehouse Receipts" [ref=e100] [cursor=pointer]
+        - button "Coffee Lots" [ref=e108] [cursor=pointer]
+        - button "Storage Loss" [ref=e115] [cursor=pointer]
+        - button "Processing 4" [ref=e121] [cursor=pointer]:
+          - generic [ref=e132]: Processing
+          - generic [ref=e133]: "4"
+        - button "Dispatch" [ref=e136] [cursor=pointer]
+        - button "Ownership Transfers" [ref=e145] [cursor=pointer]
+        - button "Bag Control" [ref=e152] [cursor=pointer]
+        - button "Labour" [ref=e159] [cursor=pointer]
+        - button "Generator Requests" [ref=e167] [cursor=pointer]
+      - generic [ref=e174]:
+        - paragraph [ref=e175]: MANAGEMENT
+        - button "Finance" [ref=e176] [cursor=pointer]
+        - button "Arrears Cases" [ref=e183] [cursor=pointer]
+        - button "Reports" [ref=e189] [cursor=pointer]
+        - button "Documents" [ref=e196] [cursor=pointer]
+        - button "Approvals 3" [ref=e203] [cursor=pointer]:
+          - generic [ref=e208]: Approvals
+          - generic [ref=e209]: "3"
+        - button "Audit History" [ref=e212] [cursor=pointer]
+        - button "Administration" [ref=e219] [cursor=pointer]
+    - generic [ref=e226]:
+      - generic [ref=e227]: HW
+      - generic [ref=e228]:
+        - strong [ref=e229]: Main Warehouse
+        - generic [ref=e230]: Gelancho, Addis Ababa
+    - generic [ref=e231]:
+      - text: All systems operational
+      - generic [ref=e233]: v0.1
+  - generic [ref=e234]:
+    - generic [ref=e235]:
+      - generic [ref=e236]:
+        - generic [ref=e237]: Operations
+        - strong [ref=e240]: Representatives
+      - generic [ref=e241]:
+        - textbox [ref=e246]:
+          - /placeholder: Search GRN, lot, client or order...
+        - button "Approvals" [ref=e247] [cursor=pointer]:
+          - generic [ref=e252]: "3"
+        - button "Notifications" [ref=e253] [cursor=pointer]:
+          - generic [ref=e257]: "4"
+        - button "MT Meron Tadesse System Administrator" [ref=e258] [cursor=pointer]:
+          - generic [ref=e259]: MT
+          - generic [ref=e260]:
+            - strong [ref=e261]: Meron Tadesse
+            - generic [ref=e262]: System Administrator
+    - generic [ref=e467]:
+      - generic [ref=e468]:
+        - generic [ref=e469]:
+          - generic [ref=e470]: AUTHORIZATION
+          - heading "Authorized representatives" [level=1] [ref=e559]
+          - paragraph [ref=e472]: Expired or revoked representatives cannot confirm a new transaction.
+        - button "New representative" [active] [ref=e560] [cursor=pointer]
+      - generic [ref=e476]:
+        - generic [ref=e477]:
+          - generic [ref=e478]: Representative
+          - generic [ref=e479]: Client
+          - generic [ref=e480]: Contact
+          - generic [ref=e481]: Allowed actions
+          - generic [ref=e482]: Status
+        - generic [ref=e561]:
+          - generic [ref=e562]:
+            - strong [ref=e563]: Aster Kebede
+            - generic [ref=e564]: Expires 2026-12-31
+          - generic [ref=e565]: Guji Specialty Coffee PLC
+          - generic [ref=e566]: +251 911 245 760
+          - generic [ref=e567]: Receipt, processing, dispatch
+          - generic [ref=e568]: ACTIVE
+      - form "Add Authorized Representative" [ref=e570]:
+        - generic [ref=e571]:
+          - generic [ref=e572]:
+            - generic [ref=e573]: CLIENT ONBOARDING
+            - heading "Add Authorized Representative" [level=2] [ref=e574]
+            - paragraph [ref=e575]: Master records remain available to all authorized warehouse workflows.
+          - button "Close form" [ref=e576] [cursor=pointer]
+        - generic [ref=e580]:
+          - generic [ref=e581]:
+            - text: Client
+            - combobox "Client" [ref=e582]:
+              - option "Select client" [disabled] [selected]
+              - option "CL-0015 - Guji Specialty Coffee PLC"
+          - generic [ref=e583]:
+            - text: Full name
+            - textbox "Full name" [ref=e584]
+          - generic [ref=e585]:
+            - text: Identity number
+            - textbox "Identity number" [ref=e586]
+          - generic [ref=e587]:
+            - text: Phone
+            - textbox "Phone" [ref=e588]
+          - generic [ref=e589]:
+            - text: Valid from
+            - textbox "Valid from" [ref=e590]: 2026-08-01
+          - generic [ref=e591]:
+            - text: Valid to
+            - textbox "Valid to" [ref=e592]
+          - generic [ref=e593]:
+            - checkbox "Active authorization" [checked] [ref=e594]
+            - text: Active authorization
+        - generic [ref=e595]:
+          - button "Cancel" [ref=e596] [cursor=pointer]
+          - button "Save record" [ref=e597] [cursor=pointer]
