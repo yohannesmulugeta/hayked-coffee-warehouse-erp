@@ -82,12 +82,12 @@ from public.warehouses warehouse where warehouse.code = 'GEL'
 on conflict (id) do nothing;
 
 insert into public.processing_requests (
-  id, request_note_number, request_date, client_name, client_id, lot_reference, warehouse_receipt_id,
+  id, request_number, request_note_number, request_date, client_name, client_id, lot_reference, warehouse_receipt_id,
   lot_id, coffee_type, requested_preparation_type, grade, requested_bags, requested_kg,
   certifications, requester_name, checker_name, approver_name, notes,
   scanned_document_attached, status, created_by, approved_by
 ) values (
-  '80000000-0000-0000-0000-000000000001', '00239', '2026-08-01', 'Guji Specialty Coffee PLC',
+  '80000000-0000-0000-0000-000000000001', 'REQ-2026-0001', '00239', '2026-08-01', 'Guji Specialty Coffee PLC',
   '20000000-0000-0000-0000-000000000001', 'HYK/GEL/2026/0040',
   '50000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000001',
   'UNWASHED_UG', 'Export preparation', 'Grade 1', 160, 9600, array['Non-certified'],

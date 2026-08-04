@@ -177,7 +177,7 @@ declare
   processing public.processing_orders;
   request public.processing_requests;
   primary_lot public.coffee_lots;
-  output line_record_type;
+  output record;
   output_line public.processing_outputs;
   child_lot public.coffee_lots;
   new_lot_number text;
