@@ -30,7 +30,7 @@ export function evaluateRelease(input: ReleaseReadiness) {
 export function evaluateEcsReceipt(input: { sentKg: number; receivedKg: number; alreadyReceived: boolean; varianceApproved: boolean }) {
   const varianceKg = input.receivedKg - input.sentKg;
   const errors: string[] = [];
-  if (input.sentKg <= 0 || input.receivedKg <= 0) errors.push("ECS quantities must be positive.");
+  if (input.sentKg <= 0 || input.receivedKg <= 0) errors.push("ECX quantities must be positive.");
   if (input.alreadyReceived) errors.push("The destination receipt has already been posted.");
   if (Math.abs(varianceKg) > 0.01 && !input.varianceApproved) errors.push("Quantity differences require explanation and approval.");
   return { valid: errors.length === 0, varianceKg, errors };
