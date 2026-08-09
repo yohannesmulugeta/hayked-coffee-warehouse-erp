@@ -39,7 +39,7 @@ type ReceiptRow = {
   bag_weight_kg: number | null; gross_weight_kg: number | null; tare_weight_kg: number | null;
   moisture_percent: number | null; wet_coffee: boolean;
 };
-export type LotRow = { id: string; lot_number: string; receipt_id: string | null; client_id: string; coffee_type: "WASHED" | "UNWASHED_UG"; bag_count: number; quantity_kg: number; section: string; status: CoffeeLot["status"]; lot_category?: EligibleProcessingLot["lot_category"]; parent_lot_id?: string | null; source_processing_order_id?: string | null };
+export type LotRow = { id: string; lot_number: string; receipt_id: string | null; client_id: string; coffee_type: "WASHED" | "UNWASHED_UG"; bag_count: number; quantity_kg: number; section: string; status: CoffeeLot["status"]; lot_category?: EligibleProcessingLot["lot_category"]; ownership_type?: "CLIENT" | "HAYKED"; parent_lot_id?: string | null; source_processing_order_id?: string | null };
 type MovementRow = { id: string; lot_id: string; movement_type: StockMovement["type"]; quantity_kg: number; bag_delta: number; reference_id: string };
 export type ProfileRow = { id: string; full_name: string; role: string; active: boolean };
 
@@ -55,7 +55,10 @@ export type CoreData = {
   receipts: WarehouseReceipt[];
   lots: CoffeeLot[];
   movements: StockMovement[];
+  tariffs: { code: string; name: string; active: boolean }[];
 };
+
+export type GlobalSearchResult = { id: string; kind: "Client" | "GRN" | "Lot" | "Processing" | "Dispatch" | "Invoice"; title: string; context: string; view: string };
 
 export type DashboardData = {
   metrics: { label: string; value: number; unit: string; detail: string }[];
@@ -64,28 +67,35 @@ export type DashboardData = {
   attention: { count: number; label: string; note: string; tone: "red" | "amber" }[];
   activities: string[][];
   pendingApprovals: number;
+  searchIndex: GlobalSearchResult[];
 };
 
 export async function loadDashboardData(): Promise<DashboardData> {
   const db = createSupabaseClient();
-  const [lotResult, orderResult, movementResult, approvalResult, agreementResult, invoiceResult, auditResult, profileResult] = await Promise.all([
-    db.from("coffee_lots").select("id,lot_category,ownership_type,bag_count,quantity_kg,status"),
-    db.from("processing_orders").select("status,input_kg"),
+  const [lotResult, orderResult, movementResult, approvalResult, agreementResult, invoiceResult, auditResult, profileResult, clientResult, receiptResult, dispatchResult] = await Promise.all([
+    db.from("coffee_lots").select("id,lot_number,client_id,lot_category,ownership_type,bag_count,quantity_kg,status"),
+    db.from("processing_orders").select("id,order_number,client_id,status,input_kg"),
     db.from("stock_movements").select("movement_type,quantity_kg,occurred_at").order("occurred_at"),
     db.from("approvals").select("request_type,status"),
     db.from("agreements").select("status,effective_to"),
-    db.from("invoices").select("status"),
+    db.from("invoices").select("id,invoice_number,client_id,status"),
     db.from("audit_events").select("action,reference_type,reference_id,event_data,occurred_at,actor_id").order("occurred_at", { ascending: false }).limit(8),
     db.from("profiles").select("id,full_name"),
+    db.from("clients").select("id,code,legal_name"),
+    db.from("warehouse_receipts").select("id,receipt_number,client_id,status"),
+    db.from("dispatch_orders").select("id,dispatch_number,client_id,status"),
   ]);
-  const lots = result(lotResult.data, lotResult.error) as { lot_category: string | null; ownership_type: string; bag_count: number; quantity_kg: number; status: string }[];
-  const orders = result(orderResult.data, orderResult.error) as { status: string; input_kg: number }[];
+  const lots = result(lotResult.data, lotResult.error) as { id: string; lot_number: string; client_id: string; lot_category: string | null; ownership_type: string; bag_count: number; quantity_kg: number; status: string }[];
+  const orders = result(orderResult.data, orderResult.error) as { id: string; order_number: string; client_id: string; status: string; input_kg: number }[];
   const movements = result(movementResult.data, movementResult.error) as { movement_type: string; quantity_kg: number; occurred_at: string }[];
   const approvals = result(approvalResult.data, approvalResult.error) as { request_type: string; status: string }[];
   const agreements = result(agreementResult.data, agreementResult.error) as { status: string; effective_to: string | null }[];
-  const invoices = result(invoiceResult.data, invoiceResult.error) as { status: string }[];
+  const invoices = result(invoiceResult.data, invoiceResult.error) as { id: string; invoice_number: string; client_id: string; status: string }[];
   const audits = result(auditResult.data, auditResult.error) as { action: string; reference_type: string; reference_id: string; event_data: Record<string, unknown>; occurred_at: string; actor_id: string }[];
   const profiles = result(profileResult.data, profileResult.error) as { id: string; full_name: string }[];
+  const clients = result(clientResult.data, clientResult.error) as { id: string; code: string; legal_name: string }[];
+  const receipts = result(receiptResult.data, receiptResult.error) as { id: string; receipt_number: string; client_id: string; status: string }[];
+  const dispatches = result(dispatchResult.data, dispatchResult.error) as { id: string; dispatch_number: string; client_id: string; status: string }[];
   const activeLots = lots.filter((item) => Number(item.quantity_kg) > 0 && !["CLOSED", "DISPATCHED", "REVERSED"].includes(item.status));
   const metric = (filter: (lot: typeof activeLots[number]) => boolean) => {
     const rows = activeLots.filter(filter);
@@ -112,6 +122,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
   const inThirtyDays = new Date(today); inThirtyDays.setDate(today.getDate() + 30);
   const pendingApprovals = approvals.filter((item) => item.status === "PENDING").length;
   const profileById = new Map(profiles.map((item) => [item.id, item.full_name]));
+  const clientById = new Map(clients.map((item) => [item.id, item.legal_name]));
   return {
     metrics: [
       { label: "Total Coffee in Warehouse", value: total.kg, unit: "kg", detail: `${total.bags.toLocaleString()} bags` },
@@ -139,20 +150,29 @@ export async function loadDashboardData(): Promise<DashboardData> {
       new Date(item.occurred_at).toLocaleString(),
     ]),
     pendingApprovals,
+    searchIndex: [
+      ...clients.map((item) => ({ id: item.id, kind: "Client" as const, title: item.legal_name, context: item.code, view: "Clients" })),
+      ...receipts.map((item) => ({ id: item.id, kind: "GRN" as const, title: item.receipt_number, context: `${clientById.get(item.client_id) ?? "Unknown client"} - ${item.status.replaceAll("_", " ")}`, view: "Warehouse Receipts" })),
+      ...lots.map((item) => ({ id: item.id, kind: "Lot" as const, title: item.lot_number, context: `${clientById.get(item.client_id) ?? "Unknown client"} - ${item.status.replaceAll("_", " ")}`, view: "Coffee Lots" })),
+      ...orders.map((item) => ({ id: item.id, kind: "Processing" as const, title: item.order_number, context: `${clientById.get(item.client_id) ?? "Unknown client"} - ${item.status.replaceAll("_", " ")}`, view: "Processing" })),
+      ...dispatches.map((item) => ({ id: item.id, kind: "Dispatch" as const, title: item.dispatch_number, context: `${clientById.get(item.client_id) ?? "Unknown client"} - ${item.status.replaceAll("_", " ")}`, view: "Dispatch" })),
+      ...invoices.map((item) => ({ id: item.id, kind: "Invoice" as const, title: item.invoice_number, context: `${clientById.get(item.client_id) ?? "Unknown client"} - ${item.status.replaceAll("_", " ")}`, view: "Finance" })),
+    ],
   };
 }
 
 export async function loadCoreData(): Promise<CoreData> {
   const db = createSupabaseClient();
-  const [clientResult, agreementResult, representativeResult, warehouseResult, receiptResult, lotResult, movementResult, profileResult] = await Promise.all([
+  const [clientResult, agreementResult, representativeResult, warehouseResult, receiptResult, lotResult, movementResult, profileResult, tariffResult] = await Promise.all([
     db.from("clients").select("id,code,legal_name,tin,active").order("code"),
     db.from("agreements").select("id,client_id,agreement_number,effective_from,effective_to,tariff_version,status").order("agreement_number"),
     db.from("authorized_representatives").select("id,client_id,full_name,identity_number,phone,valid_from,valid_to,active").order("full_name"),
     db.from("warehouses").select("id,name").eq("active", true),
     db.from("warehouse_receipts").select("*").order("created_at", { ascending: false }),
-    db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,bag_count,quantity_kg,section,status").order("created_at", { ascending: false }),
+    db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,lot_category,ownership_type,bag_count,quantity_kg,section,status").order("created_at", { ascending: false }),
     db.from("stock_movements").select("id,lot_id,movement_type,quantity_kg,bag_delta,reference_id").order("occurred_at", { ascending: false }),
     db.from("profiles").select("id,full_name,role,active"),
+    db.from("tariff_versions").select("version_code,description,active").order("effective_from", { ascending: false }),
   ]);
   const clients = result(clientResult.data as ClientRow[] | null, clientResult.error);
   const agreements = result(agreementResult.data as AgreementRow[] | null, agreementResult.error);
@@ -162,6 +182,7 @@ export async function loadCoreData(): Promise<CoreData> {
   const lots = result(lotResult.data as LotRow[] | null, lotResult.error);
   const movements = result(movementResult.data as MovementRow[] | null, movementResult.error);
   const profiles = result(profileResult.data as ProfileRow[] | null, profileResult.error);
+  const tariffs = result(tariffResult.data as { version_code: string; description: string | null; active: boolean }[] | null, tariffResult.error);
   const clientById = new Map(clients.map((item) => [item.id, item]));
   const agreementById = new Map(agreements.map((item) => [item.id, item]));
   const representativeById = new Map(representatives.map((item) => [item.id, item]));
@@ -221,13 +242,15 @@ export async function loadCoreData(): Promise<CoreData> {
         databaseId: item.id, lotNumber: item.lot_number, sourceGrn: receipt?.receipt_number ?? "Derived lot",
         client: clientById.get(item.client_id)?.legal_name ?? "Hayked", coffee: item.coffee_type === "WASHED" ? "Washed" : "Unwashed / UG",
         grade: receipt?.grade ?? "-", section: item.section, bags: item.bag_count, weightKg: Number(item.quantity_kg), status: item.status,
+        lotCategory: item.lot_category ?? null, ownershipType: item.ownership_type,
       };
     }),
     movements: movements.map((item) => ({
-      databaseId: item.id, id: item.id.slice(0, 8).toUpperCase(), sourceGrn: receiptById.get(item.reference_id)?.receipt_number ?? item.reference_id.slice(0, 8),
+      databaseId: item.id, id: item.id.slice(-8).toUpperCase(), sourceGrn: receiptById.get(item.reference_id)?.receipt_number ?? item.reference_id.slice(-8).toUpperCase(),
       lotNumber: lotById.get(item.lot_id)?.lot_number ?? "Unknown lot", type: item.movement_type,
       bagsDelta: item.bag_delta, weightDeltaKg: Number(item.quantity_kg),
     })),
+    tariffs: tariffs.map((item) => ({ code: item.version_code, name: item.description?.trim() || "Hayked standard rates", active: item.active })),
   };
 }
 
@@ -242,12 +265,13 @@ export async function createClient(client: NewClient) {
     currentUserId(),
   ]);
   const organizationData = result(organization.data, organization.error);
-  const { error } = await db.from("clients").insert({
+  const { data, error } = await db.from("clients").insert({
     organization_id: organizationData.id, code: client.code.trim(), legal_name: client.legalName.trim(),
     tin: client.tin.trim() || null, phone: client.phone.trim() || null, email: client.email.trim() || null,
     active: true, created_by: userId,
-  });
+  }).select("id").single();
   if (error) throw new Error(error.message);
+  return data.id as string;
 }
 
 export async function createAgreement(agreement: NewAgreement) {
@@ -486,6 +510,7 @@ export async function decideCreditOverride(id: string, decision: "APPROVED" | "R
 
 export type InvoiceRow = { id: string; invoice_number: string; client_id: string; tariff_version: string; subtotal_etb: number; tax_etb: number; total_etb: number; status: string; issued_on: string | null; due_on: string | null; line_snapshot: { description: string; quantity: number; rate_etb: number }[] };
 export type PaymentRow = { id: string; payment_number: string; invoice_id: string; client_id: string; amount_etb: number; bank_reference: string; paid_at: string; direction: string };
+export type ServiceEventRow = { id: string; client_id: string; service_type: string; description: string; quantity: number; unit_price: number; total_amount: number; reference_id: string; invoice_id: string | null; status: string; created_at: string };
 export type FinanceData = {
   invoices: InvoiceRow[];
   payments: PaymentRow[];
@@ -494,11 +519,12 @@ export type FinanceData = {
   movements: { lot_id: string; bag_delta: number; occurred_at: string; reference_type: string }[];
   tariffs: { id: string; version_code: string; description: string | null; effective_from: string; effective_to: string | null; active: boolean; verified_by_1: string | null; verified_by_2: string | null }[];
   storageRuns: { id: string; duplicate_key: string; client_id: string; lot_id: string; run_number: string; total_amount: number; status: string }[];
+  serviceEvents: ServiceEventRow[];
 };
 
 export async function loadFinanceData(): Promise<FinanceData> {
   const db = createSupabaseClient();
-  const [invoiceResult, paymentResult, clientResult, lotResult, receiptResult, movementResult, tariffResult, storageRunResult] = await Promise.all([
+  const [invoiceResult, paymentResult, clientResult, lotResult, receiptResult, movementResult, tariffResult, storageRunResult, serviceEventResult] = await Promise.all([
     db.from("invoices").select("id,invoice_number,client_id,tariff_version,subtotal_etb,tax_etb,total_etb,status,issued_on,due_on,line_snapshot").order("created_at", { ascending: false }),
     db.from("payments").select("id,payment_number,invoice_id,client_id,amount_etb,bank_reference,paid_at,direction").order("paid_at", { ascending: false }),
     db.from("clients").select("id,code,legal_name,tin,active").order("legal_name"),
@@ -507,6 +533,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
     db.from("stock_movements").select("lot_id,bag_delta,occurred_at,reference_type").order("occurred_at"),
     db.from("tariff_versions").select("id,version_code,description,effective_from,effective_to,active,verified_by_1,verified_by_2").order("effective_from", { ascending: false }),
     db.from("storage_billing_runs").select("id,duplicate_key,client_id,lot_id,run_number,total_amount,status").order("created_at", { ascending: false }),
+    db.from("service_events").select("id,client_id,service_type,description,quantity,unit_price,total_amount,reference_id,invoice_id,status,created_at").order("created_at", { ascending: false }),
   ]);
   const receiptDates = new Map((receiptResult.data ?? []).map((item) => [item.id, item.arrival_at]));
   return {
@@ -517,6 +544,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
     movements: result(movementResult.data as FinanceData["movements"] | null, movementResult.error),
     tariffs: result(tariffResult.data as FinanceData["tariffs"] | null, tariffResult.error),
     storageRuns: result(storageRunResult.data as FinanceData["storageRuns"] | null, storageRunResult.error),
+    serviceEvents: result(serviceEventResult.data as ServiceEventRow[] | null, serviceEventResult.error),
   };
 }
 
@@ -596,6 +624,7 @@ export async function loadManagementData() {
     profiles: result(profileResult.data as ProfileRow[] | null, profileResult.error),
     adminUsers: adminUserResult.error ? [] : adminUserResult.data as AdminUserRow[],
     businessReferences,
+    clients: clientResult.data ?? [],
   };
 }
 
@@ -639,6 +668,66 @@ export async function loadOperationalReport(title: string) {
   return [headers.map(escape).join(","), ...rows.map((row) => headers.map((header) => escape(row[header])).join(","))].join("\n");
 }
 
+export type ReportType = "Stock" | "Receipts" | "Processing" | "Dispatch" | "Billing";
+export type ReportTable = { columns: string[]; rows: { id: string; clientId: string; date: string; values: string[] }[] };
+
+export async function loadReportTable(type: ReportType, filters: { from: string; to: string; clientId: string }): Promise<ReportTable> {
+  const db = createSupabaseClient();
+  const clientResult = await db.from("clients").select("id,legal_name");
+  const clients = result(clientResult.data as { id: string; legal_name: string }[] | null, clientResult.error);
+  const clientById = new Map(clients.map((item) => [item.id, item.legal_name]));
+  const clientName = (id: string) => clientById.get(id) ?? "Unknown client";
+
+  if (type === "Stock") {
+    let query = db.from("coffee_lots").select("id,lot_number,client_id,lot_category,ownership_type,status,section,bag_count,quantity_kg").order("lot_number");
+    if (filters.clientId) query = query.eq("client_id", filters.clientId);
+    const { data, error } = await query;
+    const rows = result(data, error) as { id: string; lot_number: string; client_id: string; lot_category: string | null; ownership_type: string; status: string; section: string; bag_count: number; quantity_kg: number }[];
+    const typeLabel = (row: typeof rows[number]) => row.lot_category === "ARRIVAL" ? "Arrival" : row.lot_category === "ACCEPTED_PROCESSED" ? "Processed" : row.lot_category === "CLIENT_REJECT" ? "Reject" : row.lot_category === "HAYKED_BYPRODUCT" || row.ownership_type === "HAYKED" ? "Hayked Byproduct" : "Other";
+    const statusLabel = (status: string) => ({ ARRIVAL_IN_STORAGE: "Available", WAITING_PROCESSING: "Waiting Processing", IN_PROCESS: "In Processing", PROCESSED: "Available", AWAITING_DISPATCH: "Awaiting Dispatch", IN_TRANSIT: "Reserved", DISPATCHED: "Closed", CLOSED: "Closed", REVERSED: "Reversed" } as Record<string, string>)[status] ?? status.replaceAll("_", " ");
+    return { columns: ["Client", "Lot", "Type", "Status", "Section", "Bags", "KG"], rows: rows.map((row) => ({ id: row.id, clientId: row.client_id, date: "", values: [clientName(row.client_id), row.lot_number, typeLabel(row), statusLabel(row.status), row.section, String(row.bag_count), Number(row.quantity_kg).toLocaleString()] })) };
+  }
+
+  if (type === "Receipts") {
+    let query = db.from("warehouse_receipts").select("id,receipt_number,client_id,arrival_at,bag_count,net_weight_kg,vehicle_plate,status").order("arrival_at", { ascending: false });
+    if (filters.from) query = query.gte("arrival_at", `${filters.from}T00:00:00`);
+    if (filters.to) query = query.lte("arrival_at", `${filters.to}T23:59:59`);
+    if (filters.clientId) query = query.eq("client_id", filters.clientId);
+    const [{ data, error }, lotsResult] = await Promise.all([query, db.from("coffee_lots").select("receipt_id,lot_number").not("receipt_id", "is", null)]);
+    const rows = result(data, error) as { id: string; receipt_number: string; client_id: string; arrival_at: string; bag_count: number; net_weight_kg: number; vehicle_plate: string; status: string }[];
+    const lotByReceipt = new Map((lotsResult.data ?? []).map((item) => [item.receipt_id, item.lot_number]));
+    return { columns: ["Date", "GRN", "Client", "Lot", "Bags", "KG", "Vehicle", "Status"], rows: rows.map((row) => ({ id: row.id, clientId: row.client_id, date: row.arrival_at.slice(0, 10), values: [row.arrival_at.slice(0, 10), row.receipt_number, clientName(row.client_id), lotByReceipt.get(row.id) ?? "Pending", String(row.bag_count), Number(row.net_weight_kg).toLocaleString(), row.vehicle_plate, row.status.replaceAll("_", " ")] })) };
+  }
+
+  if (type === "Processing") {
+    let query = db.from("processing_orders").select("id,order_number,completion_number,client_id,created_at,input_kg,accepted_client_kg,client_reject_kg,process_loss_kg,status").order("created_at", { ascending: false });
+    if (filters.from) query = query.gte("created_at", `${filters.from}T00:00:00`);
+    if (filters.to) query = query.lte("created_at", `${filters.to}T23:59:59`);
+    if (filters.clientId) query = query.eq("client_id", filters.clientId);
+    const { data, error } = await query;
+    const rows = result(data, error) as { id: string; order_number: string; completion_number: string | null; client_id: string; created_at: string; input_kg: number; accepted_client_kg: number; client_reject_kg: number; process_loss_kg: number; status: string }[];
+    return { columns: ["Date", "Order", "Client", "Input KG", "Processed KG", "Reject KG", "Loss KG", "Status"], rows: rows.map((row) => ({ id: row.id, clientId: row.client_id, date: row.created_at.slice(0, 10), values: [row.created_at.slice(0, 10), row.completion_number ?? row.order_number, clientName(row.client_id), Number(row.input_kg).toLocaleString(), Number(row.accepted_client_kg).toLocaleString(), Number(row.client_reject_kg).toLocaleString(), Number(row.process_loss_kg).toLocaleString(), row.status.replaceAll("_", " ")] })) };
+  }
+
+  if (type === "Dispatch") {
+    let query = db.from("dispatch_orders").select("id,dispatch_number,client_id,dispatch_date,destination,bag_count,quantity_kg,status").order("dispatch_date", { ascending: false });
+    if (filters.from) query = query.gte("dispatch_date", filters.from);
+    if (filters.to) query = query.lte("dispatch_date", filters.to);
+    if (filters.clientId) query = query.eq("client_id", filters.clientId);
+    const { data, error } = await query;
+    const rows = result(data, error) as { id: string; dispatch_number: string; client_id: string; dispatch_date: string; destination: string | null; bag_count: number; quantity_kg: number; status: string }[];
+    return { columns: ["Date", "Dispatch", "Client", "Destination", "Bags", "KG", "Status"], rows: rows.map((row) => ({ id: row.id, clientId: row.client_id, date: row.dispatch_date, values: [row.dispatch_date, row.dispatch_number, clientName(row.client_id), row.destination ?? "-", String(row.bag_count), Number(row.quantity_kg).toLocaleString(), row.status.replaceAll("_", " ")] })) };
+  }
+
+  let query = db.from("invoices").select("id,invoice_number,client_id,issued_on,total_etb,status").order("issued_on", { ascending: false });
+  if (filters.from) query = query.gte("issued_on", filters.from);
+  if (filters.to) query = query.lte("issued_on", filters.to);
+  if (filters.clientId) query = query.eq("client_id", filters.clientId);
+  const { data, error } = await query;
+  const rows = result(data, error) as { id: string; invoice_number: string; client_id: string; issued_on: string | null; total_etb: number; status: string }[];
+  return { columns: ["Date", "Reference", "Client", "Type", "Amount", "Status"], rows: rows.map((row) => ({ id: row.id, clientId: row.client_id, date: row.issued_on ?? "", values: [row.issued_on ?? "-", row.invoice_number, clientName(row.client_id), "Invoice", `ETB ${Number(row.total_etb).toLocaleString()}`, row.status.replaceAll("_", " ")] })) };
+}
+
 export async function decideApproval(id: string, decision: "APPROVED" | "REJECTED", note: string) {
   const { error } = await createSupabaseClient().rpc("decide_approval", { approval_id: id, decision, note });
   if (error) throw new Error(error.message);
@@ -670,11 +759,12 @@ export type WarehouseControlData = {
   generatorRequests: { id: string; request_number: string; client_id: string; lot_id: string | null; processing_order_id: string | null; diesel_litres: number; unit_cost: number; total_cost: number; status: string }[];
   labourSettings: { id: string; fixed_addition_etb: number; effective_from: string; effective_to: string | null; active: boolean }[];
   labourRecords: { id: string; labour_number: string; work_date: string; client_id: string; lot_id: string | null; processing_order_id: string | null; dispatch_id: string | null; activity: string; quantity: number; unit_label: string; internal_cost_etb: number; charge_addition_etb: number; client_charge_etb: number; note: string | null; external_reference: string | null; service_event_id: string | null; created_at: string }[];
+  storageLosses: { id: string; lot_id: string; measured_balance_kg: number; loss_kg: number; loss_percent: number; status: string; created_at: string }[];
 };
 
 export async function loadWarehouseControlData(): Promise<WarehouseControlData> {
   const db = createSupabaseClient();
-  const [clients, lots, profiles, processingOrders, bagOrders, generatorRequests, labourSettings, labourRecords] = await Promise.all([
+  const [clients, lots, profiles, processingOrders, bagOrders, generatorRequests, labourSettings, labourRecords, storageLosses] = await Promise.all([
     db.from("clients").select("id,code,legal_name,tin,active").order("legal_name"),
     db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,bag_count,quantity_kg,section,status").order("lot_number"),
     db.from("profiles").select("id,full_name,role,active").order("full_name"),
@@ -683,6 +773,7 @@ export async function loadWarehouseControlData(): Promise<WarehouseControlData> 
     db.from("generator_usage_requests").select("id,request_number,client_id,lot_id,processing_order_id,diesel_litres,unit_cost,total_cost,status").order("created_at", { ascending: false }),
     db.from("labour_charge_settings").select("id,fixed_addition_etb,effective_from,effective_to,active").order("effective_from", { ascending: false }),
     db.from("labour_records").select("id,labour_number,work_date,client_id,lot_id,processing_order_id,dispatch_id,activity,quantity,unit_label,internal_cost_etb,charge_addition_etb,client_charge_etb,note,external_reference,service_event_id,created_at").order("created_at", { ascending: false }),
+    db.from("storage_losses").select("id,lot_id,measured_balance_kg,loss_kg,loss_percent,status,created_at").order("created_at", { ascending: false }),
   ]);
   return {
     clients: result(clients.data as ClientRow[] | null, clients.error),
@@ -693,6 +784,7 @@ export async function loadWarehouseControlData(): Promise<WarehouseControlData> 
     generatorRequests: result(generatorRequests.data as WarehouseControlData["generatorRequests"] | null, generatorRequests.error),
     labourSettings: result(labourSettings.data as WarehouseControlData["labourSettings"] | null, labourSettings.error),
     labourRecords: result(labourRecords.data as WarehouseControlData["labourRecords"] | null, labourRecords.error),
+    storageLosses: result(storageLosses.data as WarehouseControlData["storageLosses"] | null, storageLosses.error),
   };
 }
 

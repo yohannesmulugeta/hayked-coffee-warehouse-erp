@@ -44,6 +44,8 @@ export type CoffeeLot = {
   bags: number;
   weightKg: number;
   status: "ARRIVAL_IN_STORAGE" | "WAITING_PROCESSING" | "IN_PROCESS" | "PROCESSED" | "AWAITING_DISPATCH" | "IN_TRANSIT" | "DISPATCHED" | "CLOSED" | "REVERSED";
+  lotCategory?: "ARRIVAL" | "CLIENT_REJECT" | "ACCEPTED_PROCESSED" | "HAYKED_BYPRODUCT" | "OTHER" | null;
+  ownershipType?: "CLIENT" | "HAYKED";
 };
 
 export type StockMovement = {
@@ -94,6 +96,8 @@ export function postReceipt(receipt: WarehouseReceipt, lotNumber: string, existi
     bags: receipt.bags,
     weightKg: receipt.netWeightKg,
     status: "ARRIVAL_IN_STORAGE",
+    lotCategory: "ARRIVAL",
+    ownershipType: "CLIENT",
   };
   const movement: StockMovement = {
     id: `MOV-${receipt.id}`,

@@ -24,6 +24,7 @@ import {
   type ProcessingData,
   type EligibleProcessingLot,
 } from "@/lib/erp-data";
+import type { ProcessingStateFilter } from "./ux-rules";
 
 type Tab = "Requests" | "Queue" | "Active Orders" | "Intake" | "Completion" | "Output Lots" | "Exceptions";
 type QueueItem = { databaseId: string; id: string; position: number; client: string; lot: string; coffeeType: CoffeeProcessingType; grade: string; inputBags: number; inputKg: number; received: string; readiness: "READY" | "BLOCKED"; note: string };
@@ -131,8 +132,9 @@ function ProcessingOrderDetail({ data, orderId, onClose }: { data: ProcessingDat
   </section></div>;
 }
 
-export function ProcessingOperations() {
+export function ProcessingOperations({ initialState = "All" }: { initialState?: ProcessingStateFilter }) {
   const [tab, setTab] = useState<Tab>("Requests");
+  const [stateFilter, setStateFilter] = useState<ProcessingStateFilter>(initialState);
   const [data, setData] = useState<ProcessingData | null>(null);
   const [requestFormOpen, setRequestFormOpen] = useState(false);
   const [requestError, setRequestError] = useState("");
@@ -187,6 +189,8 @@ export function ProcessingOperations() {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void reload(); }, []);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setStateFilter(initialState); setTab("Requests"); }, [initialState]);
 
   function saveInputLot(lot: EligibleProcessingLot, requestedKg: number, requestedBags: number) {
     if (editingInputKey !== null) {
@@ -228,7 +232,7 @@ export function ProcessingOperations() {
   }
 
   async function addRequestToQueue(request: ProcessingRequest) {
-    try { await processingRpc("queue_processing_request", request.id); await reload(); setTab("Queue"); setMessage(`${request.requestNumber} added to the processing queue.`); }
+    try { await processingRpc("queue_processing_request", request.id); await reload(); setTab("Requests"); setStateFilter("Ready to Start"); setMessage(`${request.requestNumber} is ready in the processing queue.`); }
     catch (error) { setMessage(error instanceof Error ? error.message : "Request could not be queued."); }
   }
 
@@ -243,7 +247,8 @@ export function ProcessingOperations() {
       await startProcessingOrder(item.databaseId, { intakeAt: new Date(String(form.get("intakeAt"))).toISOString(), inputBags: item.inputBags, inputKg: item.inputKg, scaleReference: String(form.get("scaleReference")), warehouseIssueReference: String(form.get("warehouseIssueReference")), machineLine: String(form.get("machineLine")), shiftName: String(form.get("shiftName")), clientMonitorPresent: form.get("clientMonitorPresent") === "on", clientMonitorName: String(form.get("clientMonitorName") ?? ""), intakeCondition: String(form.get("intakeCondition")), evidencePath: String(form.get("evidencePath") ?? "") });
       await reload();
       setMessage(`${item.id} intake posted and source stock issued once.`);
-      setTab("Active Orders");
+      setTab("Requests");
+      setStateFilter("In Progress");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Intake submission failed."); }
   }
 
@@ -266,24 +271,43 @@ export function ProcessingOperations() {
     event.preventDefault();
     if (!selectedOrder || !completion.valid) { setMessage(completion.errors[0] ?? "Select an active processing order."); return; }
     if ((completion.aboveAllowance || (selectedOrder.coffeeType === "Unwashed / UG" && completion.totals.HAYKED_BYPRODUCT > 0)) && !evidencePath.trim()) { setMessage("Approved exceptions require an evidence reference."); return; }
-    try { await completeProcessingOrder(selectedOrder.databaseId, outputLines, exceptionApproved, evidencePath); await reload(); setMessage(`${selectedOrder.id} completed and locked with ${outputLines.length} traceable outputs.`); setTab("Output Lots"); }
+    try { await completeProcessingOrder(selectedOrder.databaseId, outputLines, exceptionApproved, evidencePath); await reload(); setMessage(`${selectedOrder.id} completed and locked with ${outputLines.length} traceable outputs.`); setTab("Requests"); setStateFilter("Completed"); }
     catch (error) { setMessage(error instanceof Error ? error.message : "Processing completion failed."); }
   }
 
   const requestLineCount = (requestId: string) => data?.requestLines.filter((line) => line.request_id === requestId).length ?? 0;
   const currentQueueItem = queue.find((item) => item.databaseId === selectedOrderId) ?? queue[0];
   const exceptionOutputs = (data?.outputs ?? []).filter((line) => line.category === "PROCESS_LOSS" || line.category === "HAYKED_BYPRODUCT");
+  const workflowRows = [
+    ...requests.filter((request) => !request.queuedAs).map((request) => ({
+      key: `request-${request.id}`, reference: request.requestNumber, client: request.client, inputs: requestLineCount(request.id), quantityKg: request.requestedKg,
+      state: (request.status === "APPROVED" ? "Ready to Start" : request.status === "REJECTED" ? "Completed" : "Waiting Approval") as ProcessingStateFilter,
+      statusLabel: request.status === "DRAFT" ? "Draft - not submitted" : request.status === "SUBMITTED" ? "Waiting Approval" : request.status === "APPROVED" ? "Approved - ready to queue" : "Rejected",
+      request, queueItem: null as QueueItem | null, order: null as Order | null,
+    })),
+    ...queue.map((queueItem) => ({
+      key: `queue-${queueItem.databaseId}`, reference: queueItem.id, client: queueItem.client, inputs: data?.orderInputs.filter((input) => input.order_id === queueItem.databaseId).length ?? 0, quantityKg: queueItem.inputKg,
+      state: "Ready to Start" as ProcessingStateFilter, statusLabel: queueItem.readiness === "READY" ? "Ready to Start" : "Blocked - review reservations",
+      request: null as ProcessingRequest | null, queueItem, order: null as Order | null,
+    })),
+    ...orders.map((order) => ({
+      key: `order-${order.databaseId}`, reference: order.completionNumber ?? order.id, client: order.client, inputs: data?.orderInputs.filter((input) => input.order_id === order.databaseId).length ?? 0, quantityKg: order.inputKg,
+      state: (order.status === "IN_PROCESS" ? "In Progress" : "Completed") as ProcessingStateFilter, statusLabel: order.status === "IN_PROCESS" ? "In Progress" : "Completed",
+      request: null as ProcessingRequest | null, queueItem: null as QueueItem | null, order,
+    })),
+  ];
+  const visibleWorkflowRows = workflowRows.filter((item) => stateFilter === "All" || item.state === stateFilter);
 
   if (databaseError && !data) return <div className="module-page processing-page"><section className="module-heading"><div><span className="demo-label">CONTROLLED WORKFLOW</span><h1>Processing operations</h1><p>Request lines, intake evidence, production, and output-lot reconciliation.</p></div></section><section className="database-unavailable" role="alert"><AlertTriangle size={26} /><h2>Database unavailable</h2><p>Unable to load warehouse data. No demo stock is being shown.</p><small>{databaseError}</small><button className="primary-button" type="button" onClick={() => void reload()}>Retry database connection</button></section></div>;
 
   return <div className="module-page processing-page">
-    <section className="module-heading"><div><span className="demo-label">CONTROLLED WORKFLOW</span><h1>Processing operations</h1><p>Request lines, intake evidence, production, and output-lot reconciliation.</p></div><div className="allowance-key"><span>Washed<strong>22.5%</strong></span><span>Unwashed / UG<strong>2.5%</strong></span></div></section>
+    <section className="module-heading"><div><span className="demo-label">CONTROLLED WORKFLOW</span><h1>Processing</h1><p>Follow each request from approval to completion without choosing internal database stages.</p></div><div className="processing-heading-actions"><div className="allowance-key"><span>Washed<strong>22.5%</strong></span><span>Unwashed / UG<strong>2.5%</strong></span></div><button className="primary-button" type="button" onClick={() => { setRequestError(""); setSelectedClientId(""); setRequestLines([]); setProcessingPurpose("Export preparation"); setRequestFormOpen(true); }}><Plus size={16} />New Processing Request</button></div></section>
     {message && <div className="operation-message" role="status"><Check size={17} />{message}<button type="button" onClick={() => setMessage("")}>Close</button></div>}
-    <div className="module-tabs processing-tabs" role="tablist">{(["Requests", "Queue", "Active Orders", "Intake", "Completion", "Output Lots", "Exceptions"] as Tab[]).map((item) => <button role="tab" aria-selected={tab === item} className={tab === item ? "active" : ""} type="button" key={item} onClick={() => setTab(item)}>{item}</button>)}</div>
+    {tab !== "Requests" && <div className="context-backbar"><button className="secondary-button" type="button" onClick={() => setTab("Requests")}><ArrowRight className="back-arrow" size={15} />Back to processing list</button><span>{tab === "Intake" ? "Start Processing" : tab === "Completion" ? "Complete Processing" : tab}</span></div>}
 
     {tab === "Requests" && <>
-      <section className="queue-rule request-rule"><FileCheck2 size={18} /><div><strong>Processing order requests</strong><p>Combine one or more eligible Arrival, Reject, or Processed lots owned by the same client.</p></div><button className="primary-button" type="button" onClick={() => { setRequestError(""); setSelectedClientId(""); setRequestLines([]); setProcessingPurpose("Export preparation"); setRequestFormOpen(true); }}><Plus size={16} />New request</button></section>
-      <section className="record-panel"><div className="record-table request-cols"><div className="table-head"><span>Request</span><span>Client / source</span><span>Preparation</span><span>Quantity</span><span>Certification</span><span>Status</span><span>Control</span></div>{requests.map((request) => <div key={request.id}><span className="reference">{request.requestNumber}<small>Paper note {request.noteNumber}</small></span><span><strong>{request.client}</strong><small>{requestLineCount(request.id)} source lot(s)</small></span><span>{request.preparationType}<small>{request.coffeeType} - {request.grade}</small></span><span>{request.requestedBags.toLocaleString()} bags<small>{request.requestedKg.toLocaleString()} kg</small></span><span>{request.certifications.join(", ") || "None"}<small>{request.scannedDocumentAttached ? "Document recorded" : "No document"}</small></span><span><Status value={request.status} />{request.queuedAs && <small>{request.queuedAs}</small>}</span><span className="request-actions">{request.status === "DRAFT" && <button type="button" onClick={() => changeRequestStatus(request.id, "SUBMITTED")}><Send size={13} />Submit</button>}{request.status === "SUBMITTED" && <><button type="button" onClick={() => changeRequestStatus(request.id, "APPROVED")}><ThumbsUp size={13} />Approve</button><button className="reject" type="button" aria-label={`Reject ${request.requestNumber}`} onClick={() => changeRequestStatus(request.id, "REJECTED")}><ThumbsDown size={13} /></button></>}{request.status === "APPROVED" && !request.queuedAs && <button type="button" onClick={() => addRequestToQueue(request)}>Queue <ArrowRight size={13} /></button>}{(request.status === "REJECTED" || request.queuedAs) && <span className="muted-action">{request.status === "REJECTED" ? "Closed" : "Queued"}</span>}</span></div>)}</div></section>
+      <section className="processing-state-toolbar"><div role="tablist" aria-label="Processing status">{(["All", "Waiting Approval", "Ready to Start", "In Progress", "Completed"] as ProcessingStateFilter[]).map((state) => <button role="tab" aria-selected={stateFilter === state} className={stateFilter === state ? "active" : ""} type="button" key={state} onClick={() => setStateFilter(state)}>{state}<small>{state === "All" ? workflowRows.length : workflowRows.filter((row) => row.state === state).length}</small></button>)}</div><div><button className="secondary-button" type="button" onClick={() => setTab("Output Lots")}>Output lots</button><button className="secondary-button" type="button" onClick={() => setTab("Exceptions")}>Exceptions</button></div></section>
+      <section className="record-panel"><div className="record-table processing-workflow-cols"><div className="table-head"><span>Order / Request</span><span>Client</span><span>Inputs</span><span>Quantity</span><span>Status</span><span>Next Action</span></div>{visibleWorkflowRows.map((item) => <div key={item.key}><span><strong className="reference">{item.reference}</strong>{item.request && <small>Paper note {item.request.noteNumber}</small>}</span><span>{item.client}</span><span>{item.inputs} lot{item.inputs === 1 ? "" : "s"}</span><span>{item.quantityKg.toLocaleString()} kg</span><span><Status value={item.statusLabel} /></span><span className="request-actions">{item.request?.status === "DRAFT" && <button type="button" onClick={() => changeRequestStatus(item.request!.id, "SUBMITTED")}><Send size={13} />Submit request</button>}{item.request?.status === "SUBMITTED" && <><button type="button" onClick={() => changeRequestStatus(item.request!.id, "APPROVED")}><ThumbsUp size={13} />Approve request</button><button className="reject" type="button" aria-label={`Reject ${item.request.requestNumber}`} onClick={() => changeRequestStatus(item.request!.id, "REJECTED")}><ThumbsDown size={13} /></button></>}{item.request?.status === "APPROVED" && <button type="button" onClick={() => addRequestToQueue(item.request!)}>Queue for processing <ArrowRight size={13} /></button>}{item.request?.status === "REJECTED" && <span className="muted-action">No further action</span>}{item.queueItem && <><button className="table-action" type="button" onClick={() => setDetailOrderId(item.queueItem!.databaseId)}>Details</button><button className="table-action" type="button" disabled={item.queueItem.readiness === "BLOCKED"} onClick={() => openIntake(item.queueItem!)}>{item.queueItem.readiness === "BLOCKED" ? "Review reservations" : "Start Processing"}<ArrowRight size={13} /></button></>}{item.order && <><button className="table-action" type="button" onClick={() => setDetailOrderId(item.order!.databaseId)}>Details</button>{item.order.status === "IN_PROCESS" ? <button className="table-action" type="button" onClick={() => openCompletion(item.order!)}>Complete Processing <ArrowRight size={13} /></button> : <span className="muted-action">Locked</span>}</>}</span></div>)}</div>{visibleWorkflowRows.length === 0 && <Empty title={`No ${stateFilter.toLowerCase()} processing records`} text="Choose another status or create a new processing request." />}</section>
     </>}
 
     {requestFormOpen && <div className="modal-backdrop"><form className="receipt-modal processing-request-modal" role="dialog" aria-modal="true" aria-labelledby="processing-request-title" onSubmit={createRequest}>

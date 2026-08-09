@@ -14,6 +14,7 @@ import {
   Printer,
   RotateCcw,
   Scale,
+  Search,
   ShieldCheck,
   UserRoundCheck,
   Warehouse,
@@ -42,6 +43,7 @@ import {
   type NewRepresentative,
 } from "@/lib/erp-data";
 import { activeOn } from "./client-onboarding";
+import { lotStatusLabel, lotTypeLabel, stockMatches, type StockStatusFilter, type StockTypeFilter } from "./ux-rules";
 
 const clients: CoreClient[] = [
   { id: "demo-client-1", code: "CL-0015", name: "Guji Specialty Coffee PLC", tin: "0018472635", agreement: "AGR-2026-011", stock: "44,400 kg", status: "READY" },
@@ -68,7 +70,7 @@ const initialReceipts: WarehouseReceipt[] = [
 ];
 
 const initialLots: CoffeeLot[] = [
-  { lotNumber: "HYK/GEL/2026/0040", sourceGrn: "GRN-2026-0040", client: "Guji Specialty Coffee PLC", coffee: "Unwashed / UG Guji", grade: "Grade 1", section: "A-01 Arrival", bags: 320, weightKg: 19200, status: "ARRIVAL_IN_STORAGE" },
+  { lotNumber: "HYK/GEL/2026/0040", sourceGrn: "GRN-2026-0040", client: "Guji Specialty Coffee PLC", coffee: "Unwashed / UG Guji", grade: "Grade 1", section: "A-01 Arrival", bags: 320, weightKg: 19200, status: "ARRIVAL_IN_STORAGE", lotCategory: "ARRIVAL", ownershipType: "CLIENT" },
 ];
 
 const initialMovements: StockMovement[] = [
@@ -92,6 +94,56 @@ function OperationMessage({ message, onClose }: { message: string; onClose: () =
 }
 
 type MasterRecordKind = "client" | "agreement" | "representative";
+
+type RepresentativeDraft = { key: number; fullName: string; identityNumber: string; phone: string; validFrom: string; validTo: string; active: boolean };
+
+function NewClientModal({ tariffs, onSaved, onClose }: { tariffs: CoreData["tariffs"]; onSaved: (message: string) => Promise<void>; onClose: () => void }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [representativeKey, setRepresentativeKey] = useState(1);
+  const [representativeDrafts, setRepresentativeDrafts] = useState<RepresentativeDraft[]>([]);
+
+  function addRepresentative() {
+    setRepresentativeDrafts((current) => [...current, { key: representativeKey, fullName: "", identityNumber: "", phone: "", validFrom: today, validTo: "", active: true }]);
+    setRepresentativeKey((value) => value + 1);
+  }
+
+  function updateRepresentative(key: number, patch: Partial<RepresentativeDraft>) {
+    setRepresentativeDrafts((current) => current.map((item) => item.key === key ? { ...item, ...patch } : item));
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const data = new FormData(event.currentTarget);
+    const effectiveFrom = String(data.get("effectiveFrom"));
+    const effectiveTo = String(data.get("effectiveTo")) || null;
+    if (effectiveTo && effectiveTo < effectiveFrom) { setError("Agreement expiry cannot be before its effective date."); return; }
+    if (representativeDrafts.some((item) => !item.fullName.trim() || !item.identityNumber.trim())) { setError("Complete each added representative or remove the unfinished row."); return; }
+    if (representativeDrafts.some((item) => item.validTo && item.validTo < item.validFrom)) { setError("Representative authorization expiry cannot be before its start date."); return; }
+    setBusy(true);
+    try {
+      const legalName = String(data.get("legalName"));
+      const clientId = await createClient({ code: String(data.get("code")), legalName, tin: String(data.get("tin")), phone: String(data.get("phone")), email: String(data.get("email")) });
+      await createAgreement({ clientId, agreementNumber: String(data.get("agreementNumber")), effectiveFrom, effectiveTo, status: String(data.get("agreementStatus")) as NewAgreement["status"], defaultBagWeightKg: Number(data.get("defaultBagWeightKg")), tariffVersion: String(data.get("tariffVersion")) });
+      await Promise.all(representativeDrafts.map((item) => createRepresentative({ clientId, fullName: item.fullName, identityNumber: item.identityNumber, phone: item.phone, validFrom: item.validFrom, validTo: item.validTo || null, active: item.active })));
+      await onSaved(`${legalName} created with its agreement and ${representativeDrafts.length} authorized representative${representativeDrafts.length === 1 ? "" : "s"}.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The client onboarding record could not be saved.");
+    } finally { setBusy(false); }
+  }
+
+  const tariffOptions = tariffs.length ? tariffs : [{ code: "TV-001", name: "Hayked standard rates", active: true }];
+  return <div className="modal-backdrop" role="presentation"><form className="receipt-modal client-onboarding-modal" onSubmit={submit} aria-labelledby="new-client-title">
+    <header><div><span className="demo-label">GUIDED CLIENT SETUP</span><h2 id="new-client-title">New client</h2><p>Create the client, price agreement, and authorized representatives in one workflow.</p></div><button type="button" aria-label="Close client onboarding" onClick={onClose}><X size={20} /></button></header>
+    {error && <div className="request-form-error" role="alert">{error}</div>}
+    <section className="form-section"><h3>1. Client details</h3><div className="form-grid compact"><label>Client code<input name="code" required maxLength={30} placeholder="CL-0016" /></label><label>Legal name<input name="legalName" required maxLength={180} /></label><label>TIN<input name="tin" maxLength={60} /></label><label>Phone<input name="phone" type="tel" maxLength={60} /></label><label className="wide">Email<input name="email" type="email" maxLength={180} /></label></div></section>
+    <section className="form-section"><h3>2. Agreement</h3><p className="form-note">This agreement controls whether the client can receive and process coffee.</p><div className="form-grid compact"><label>Agreement number<input name="agreementNumber" required maxLength={60} placeholder="AGR-2026-012" /></label><label>Agreement status<select name="agreementStatus" defaultValue="ACTIVE"><option>ACTIVE</option><option>DRAFT</option></select></label><label>Effective date<input name="effectiveFrom" type="date" required defaultValue={today} /></label><label>Expiry date<input name="effectiveTo" type="date" /></label><label>Default bag weight (kg)<input name="defaultBagWeightKg" type="number" min="0.01" step="0.01" required defaultValue="60" /></label><label>Tariff / Price Agreement<select name="tariffVersion" required defaultValue={tariffOptions.find((item) => item.active)?.code ?? tariffOptions[0].code}>{tariffOptions.map((item) => <option key={item.code} value={item.code}>{item.name} {item.active ? "- Current" : "- Archived"} ({item.code})</option>)}</select></label></div></section>
+    <section className="form-section representative-builder"><div className="section-title-row"><div><h3>3. Authorized representatives</h3><p className="form-note">Add only the people authorized to act for this client.</p></div><button className="secondary-button" type="button" onClick={addRepresentative}><Plus size={15} />Add Representative</button></div>{representativeDrafts.length === 0 ? <div className="empty-input-lots"><UserRoundCheck size={22} /><strong>No representatives added yet</strong><p>The client can be saved, but receiving remains unavailable until an active representative exists.</p></div> : representativeDrafts.map((item, index) => <fieldset key={item.key}><legend>Representative {index + 1}</legend><div className="form-grid compact"><label>Full name<input required value={item.fullName} onChange={(event) => updateRepresentative(item.key, { fullName: event.target.value })} /></label><label>Identity number<input required value={item.identityNumber} onChange={(event) => updateRepresentative(item.key, { identityNumber: event.target.value })} /></label><label>Phone<input type="tel" value={item.phone} onChange={(event) => updateRepresentative(item.key, { phone: event.target.value })} /></label><label>Valid from<input type="date" required value={item.validFrom} onChange={(event) => updateRepresentative(item.key, { validFrom: event.target.value })} /></label><label>Valid to<input type="date" value={item.validTo} onChange={(event) => updateRepresentative(item.key, { validTo: event.target.value })} /></label><label className="check-label"><input type="checkbox" checked={item.active} onChange={(event) => updateRepresentative(item.key, { active: event.target.checked })} />Active authorization</label></div><button className="link-button reject" type="button" onClick={() => setRepresentativeDrafts((current) => current.filter((draft) => draft.key !== item.key))}>Remove representative</button></fieldset>)}</section>
+    <footer><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={busy}><Check size={17} />{busy ? "Creating client..." : "Create client setup"}</button></footer>
+  </form></div>;
+}
 
 function MasterRecordModal({ kind, clientOptions, onSaved, onClose }: {
   kind: MasterRecordKind;
@@ -296,7 +348,7 @@ function LotDetail({ lot, receipt, movements, onPrintGrn, onPrintTag, onClose }:
   return <div className="modal-backdrop"><div className="lot-detail-dialog"><header><div><span className="demo-label">STOCK LOT</span><h2>{lot.lotNumber}</h2><p>{lot.client}</p></div><button type="button" onClick={onClose} aria-label="Close lot details"><X size={20} /></button></header><dl><div><dt>Source GRN</dt><dd>{lot.sourceGrn}</dd></div><div><dt>Coffee</dt><dd>{lot.coffee}, {lot.grade}</dd></div><div><dt>Location</dt><dd>{lot.section}</dd></div><div><dt>Balance</dt><dd>{lot.bags} bags / {lot.weightKg.toLocaleString()} kg</dd></div><div><dt>Status</dt><dd><Status value={lot.status} /></dd></div></dl><section><h3>Movement history</h3>{movements.filter((movement) => movement.lotNumber === lot.lotNumber).map((movement) => <div key={movement.id}><span>{movement.id}</span><span>{movement.type}</span><strong>{movement.weightDeltaKg > 0 ? "+" : ""}{movement.weightDeltaKg.toLocaleString()} kg</strong></div>)}</section><footer><button className="secondary-button" type="button" onClick={onClose}>Close</button>{receipt && <button className="secondary-button" type="button" onClick={onPrintGrn}><FileText size={16} />GRN</button>}<button className="primary-button" type="button" onClick={onPrintTag}><Printer size={16} />Lot tag</button></footer></div></div>;
 }
 
-export function CoreOperations({ activeView }: { activeView: string }) {
+export function CoreOperations({ activeView, stockIntent }: { activeView: string; stockIntent?: { type: StockTypeFilter; status: StockStatusFilter; focusId?: string } }) {
   const [receipts, setReceipts] = useState(initialReceipts);
   const [lots, setLots] = useState(initialLots);
   const [movements, setMovements] = useState(initialMovements);
@@ -309,6 +361,10 @@ export function CoreOperations({ activeView }: { activeView: string }) {
   const [reverseTarget, setReverseTarget] = useState<WarehouseReceipt | null>(null);
   const [message, setMessage] = useState("");
   const [data, setData] = useState<CoreData | null>(null);
+  const [stockType, setStockType] = useState<StockTypeFilter>(stockIntent?.type ?? "All");
+  const [stockStatus, setStockStatus] = useState<StockStatusFilter>(stockIntent?.status ?? "All");
+  const [stockClient, setStockClient] = useState("All");
+  const [stockSearch, setStockSearch] = useState("");
 
   async function reload() {
     try {
@@ -325,6 +381,22 @@ export function CoreOperations({ activeView }: { activeView: string }) {
   // The initial database snapshot is loaded once when this module opens.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void reload(); }, []);
+
+  // Dashboard and global-search links update the stock workspace without changing database values.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!stockIntent) return;
+    setStockType(stockIntent.type);
+    setStockStatus(stockIntent.status);
+    if (!stockIntent.focusId || !data) return;
+    if (activeView === "Coffee Lots") {
+      setDetailLot(data.lots.find((lot) => lot.databaseId === stockIntent.focusId) ?? null);
+    }
+    if (activeView === "Warehouse Receipts") {
+      setPrintReceipt(data.receipts.find((receipt) => receipt.databaseId === stockIntent.focusId) ?? null);
+    }
+  }, [activeView, data, stockIntent]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const stock = useMemo(() => movements.reduce((total, movement) => total + movement.weightDeltaKg, 0), [movements]);
 
@@ -383,6 +455,9 @@ export function CoreOperations({ activeView }: { activeView: string }) {
   const visibleClients = data?.clients ?? clients;
   const visibleAgreements = data?.agreements ?? agreements;
   const visibleRepresentatives = data?.representatives ?? representatives;
+  const visibleTariffs = data?.tariffs ?? [];
+  const stockClients = [...new Set(lots.map((lot) => lot.client))].sort();
+  const filteredLots = lots.filter((lot) => stockMatches(lot, stockType, stockStatus, stockClient, stockSearch));
   const originOptions = [...new Set([...receipts, ...initialReceipts].map((receipt) => receipt.origin).filter((value) => value && value !== "-"))];
   const gradeOptions = [...new Set([...receipts, ...initialReceipts].map((receipt) => receipt.grade).filter((value) => value && value !== "-"))];
   const tables: Record<string, React.ReactNode> = {
@@ -391,12 +466,12 @@ export function CoreOperations({ activeView }: { activeView: string }) {
     Representatives: <><PageHeader eyebrow="AUTHORIZATION" title="Authorized representatives" copy="Expired or revoked representatives cannot confirm a new transaction." action={<button className="primary-button" type="button" onClick={() => setMasterModal("representative")}><Plus size={17} />New representative</button>} /><OperationMessage message={message} onClose={() => setMessage("")} /><section className="record-panel"><div className="record-table five-cols"><div className="table-head"><span>Representative</span><span>Client</span><span>Contact</span><span>Allowed actions</span><span>Status</span></div>{visibleRepresentatives.map((representative) => <div key={representative.id}><span><strong>{representative.name}</strong><small>Expires {representative.expiry}</small></span><span>{representative.client}</span><span>{representative.phone}</span><span>{representative.scope}</span><span><Status value={representative.status} /></span></div>)}</div></section></>,
   };
 
-  if (tables[activeView]) return <div className="module-page">{tables[activeView]}{masterModal && <MasterRecordModal kind={masterModal} clientOptions={visibleClients} onSaved={masterRecordSaved} onClose={() => setMasterModal(null)} />}</div>;
+  if (tables[activeView]) return <div className="module-page">{tables[activeView]}{masterModal === "client" ? <NewClientModal tariffs={visibleTariffs} onSaved={masterRecordSaved} onClose={() => setMasterModal(null)} /> : masterModal ? <MasterRecordModal kind={masterModal} clientOptions={visibleClients} onSaved={masterRecordSaved} onClose={() => setMasterModal(null)} /> : null}</div>;
 
-  if (activeView === "Coffee Lots") return <div className="module-page"><PageHeader eyebrow="STOCK LEDGER" title="Coffee lots" copy="Balances are derived from posted movements, not editable quantity fields." action={<div className="stock-total"><span>Posted stock</span><strong>{stock.toLocaleString()} kg</strong></div>} /><section className="record-panel"><div className="record-table seven-cols lot-cols"><div className="table-head"><span>Lot</span><span>Client</span><span>Coffee</span><span>Section</span><span>Bags</span><span>Weight</span><span>Status</span></div>{lots.map((lot) => <button className="lot-table-row" type="button" key={lot.lotNumber} onClick={() => setDetailLot(lot)}><span><strong className="reference">{lot.lotNumber}</strong><small>{lot.sourceGrn}</small></span><span>{lot.client}</span><span>{lot.coffee}, {lot.grade}</span><span>{lot.section}</span><span>{lot.bags}</span><span>{lot.weightKg.toLocaleString()} kg</span><span><Status value={lot.status} /></span></button>)}</div></section><section className="ledger-panel"><h2>Movement ledger</h2>{movements.map((movement) => <div key={movement.id}><span><History size={15} />{movement.id}</span><span>{movement.type}</span><span>{movement.lotNumber}</span><strong className={movement.weightDeltaKg < 0 ? "negative" : "positive"}>{movement.weightDeltaKg > 0 ? "+" : ""}{movement.weightDeltaKg.toLocaleString()} kg</strong></div>)}</section>{detailLot && <LotDetail lot={detailLot} receipt={receipts.find((item) => item.id === detailLot.sourceGrn)} movements={movements} onPrintGrn={() => { setPrintReceipt(receipts.find((item) => item.id === detailLot.sourceGrn) ?? null); setDetailLot(null); }} onPrintTag={() => { setTagLot(detailLot); setDetailLot(null); }} onClose={() => setDetailLot(null)} />}{tagLot && <LotTag lot={tagLot} receipt={receipts.find((item) => item.id === tagLot.sourceGrn)!} onClose={() => setTagLot(null)} />}{printReceipt && <GrnDocument receipt={printReceipt} onClose={() => setPrintReceipt(null)} />}</div>;
+  if (activeView === "Coffee Lots") return <div className="module-page"><PageHeader eyebrow="STOCK LEDGER" title="Coffee Stock" copy="Type explains what the coffee is. Status explains what is happening to it now. Balances remain movement-ledger derived." action={<div className="stock-total"><span>Posted stock</span><strong>{stock.toLocaleString()} kg</strong></div>} /><section className="stock-filter-workspace" aria-label="Coffee stock filters"><div><span>Type</span>{(["All", "Arrival", "Processed", "Reject"] as StockTypeFilter[]).map((value) => <button type="button" className={stockType === value ? "active" : ""} key={value} onClick={() => setStockType(value)}>{value}</button>)}</div><label>Status<select value={stockStatus} onChange={(event) => setStockStatus(event.target.value as StockStatusFilter)}>{(["All", "Available", "Waiting Processing", "In Processing", "Awaiting Dispatch", "Closed"] as StockStatusFilter[]).map((value) => <option key={value}>{value}</option>)}</select></label><label>Client<select value={stockClient} onChange={(event) => setStockClient(event.target.value)}><option>All</option>{stockClients.map((client) => <option key={client}>{client}</option>)}</select></label><label className="stock-search"><Search size={15} /><input value={stockSearch} onChange={(event) => setStockSearch(event.target.value)} placeholder="Search lot, GRN, coffee or section" /></label><button className="secondary-button" type="button" onClick={() => { setStockType("All"); setStockStatus("All"); setStockClient("All"); setStockSearch(""); }}>Reset</button></section><section className="record-panel"><div className="record-table eight-cols lot-cols"><div className="table-head"><span>Lot</span><span>Client</span><span>Type</span><span>Coffee</span><span>Section</span><span>Bags</span><span>Weight</span><span>Status</span></div>{filteredLots.map((lot) => <button className="lot-table-row" type="button" key={lot.lotNumber} onClick={() => setDetailLot(lot)}><span><strong className="reference">{lot.lotNumber}</strong><small>{lot.sourceGrn}</small></span><span>{lot.client}</span><span><Status value={lotTypeLabel(lot)} /></span><span>{lot.coffee}<small>{lot.grade}</small></span><span>{lot.section}</span><span>{lot.bags}</span><span>{lot.weightKg.toLocaleString()} kg</span><span><Status value={lotStatusLabel(lot.status)} /></span></button>)}</div>{filteredLots.length === 0 && <p className="empty-result">No coffee stock matches the selected filters.</p>}</section><section className="ledger-panel"><h2>Movement ledger</h2>{movements.map((movement) => <div key={movement.id}><span><History size={15} />{movement.id}</span><span>{movement.type.replaceAll("_", " ")}</span><span>{movement.lotNumber}</span><strong className={movement.weightDeltaKg < 0 ? "negative" : "positive"}>{movement.weightDeltaKg > 0 ? "+" : ""}{movement.weightDeltaKg.toLocaleString()} kg</strong></div>)}</section>{detailLot && <LotDetail lot={detailLot} receipt={receipts.find((item) => item.id === detailLot.sourceGrn)} movements={movements} onPrintGrn={() => { setPrintReceipt(receipts.find((item) => item.id === detailLot.sourceGrn) ?? null); setDetailLot(null); }} onPrintTag={() => { setTagLot(detailLot); setDetailLot(null); }} onClose={() => setDetailLot(null)} />}{tagLot && <LotTag lot={tagLot} receipt={receipts.find((item) => item.id === tagLot.sourceGrn)!} onClose={() => setTagLot(null)} />}{printReceipt && <GrnDocument receipt={printReceipt} onClose={() => setPrintReceipt(null)} />}</div>;
 
   return <div className="module-page">
-    <PageHeader eyebrow="ARRIVAL COFFEE" title="Warehouse receipts" copy="Draft, approve, and post each GRN exactly once." action={<button className="primary-button" type="button" onClick={() => setNewReceiptOpen(true)}><Plus size={17} />New GRN</button>} />
+    <PageHeader eyebrow="ARRIVAL COFFEE" title="Receive Coffee" copy="Draft, approve, and post each warehouse receipt exactly once." action={<button className="primary-button" type="button" onClick={() => setNewReceiptOpen(true)}><Plus size={17} />New receipt</button>} />
     <OperationMessage message={message} onClose={() => setMessage("")} />
     <section className="workflow-strip"><div className="complete"><FileCheck2 size={18} /><span><strong>1. Draft</strong><small>Record and validate</small></span></div><ChevronRight size={17} /><div><UserRoundCheck size={18} /><span><strong>2. Submit</strong><small>Agreement and representative</small></span></div><ChevronRight size={17} /><div><ShieldCheck size={18} /><span><strong>3. Approve</strong><small>Independent manager</small></span></div><ChevronRight size={17} /><div><PackagePlus size={18} /><span><strong>4. Post</strong><small>Create lot and stock</small></span></div></section>
     <section className="grn-summary"><article><Warehouse size={18} /><span>Posted receipts<strong>{receipts.filter((item) => item.status === "POSTED").length}</strong></span></article><article><ClipboardCheck size={18} /><span>Awaiting approval<strong>{receipts.filter((item) => item.status === "SUBMITTED").length}</strong></span></article><article><Scale size={18} /><span>Posted net weight<strong>{stock.toLocaleString()} kg</strong></span></article></section>
