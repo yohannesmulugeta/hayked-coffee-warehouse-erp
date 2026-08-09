@@ -42,6 +42,10 @@ export type ProcessingRequestLine = {
   certifications: ProcessingCertification[];
   specialInstruction: string;
   remark: string;
+  clientDatabaseId?: string;
+  availableKg?: number;
+  availableBags?: number;
+  sourceType?: "ARRIVAL" | "REJECT" | "PROCESSED";
 };
 
 export type ProcessingOutputCategory = "ACCEPTED_CLIENT_COFFEE" | "CLIENT_REJECT" | "HAYKED_BYPRODUCT" | "REWORK" | "PROCESS_LOSS";
@@ -78,11 +82,16 @@ export function validateProcessingRequestLines(lines: ProcessingRequestLine[]) {
   const errors: string[] = [];
   if (!lines.length) errors.push("At least one coffee lot is required.");
   if (new Set(lines.map((line) => line.lotDatabaseId)).size !== lines.length) errors.push("A source lot can only appear once.");
+  const clients = new Set(lines.map((line) => line.clientDatabaseId).filter(Boolean));
+  if (clients.size > 1) errors.push("All processing input lots must belong to the same client.");
   lines.forEach((line, index) => {
     if (!line.lotDatabaseId) errors.push(`Line ${index + 1}: select a source lot.`);
     if (!line.preparationType.trim()) errors.push(`Line ${index + 1}: preparation is required.`);
     if (line.requestedBags <= 0) errors.push(`Line ${index + 1}: requested bags must be positive.`);
     if (line.requestedKg <= 0) errors.push(`Line ${index + 1}: requested kg must be positive.`);
+    if (line.availableKg !== undefined && line.requestedKg > line.availableKg) errors.push(`Line ${index + 1}: requested kg exceeds available stock.`);
+    if (line.availableBags !== undefined && line.requestedBags > line.availableBags) errors.push(`Line ${index + 1}: requested bags exceed available stock.`);
+    if (line.sourceType && !["ARRIVAL", "REJECT", "PROCESSED"].includes(line.sourceType)) errors.push(`Line ${index + 1}: source type is not eligible for processing.`);
   });
   return { valid: errors.length === 0, errors };
 }

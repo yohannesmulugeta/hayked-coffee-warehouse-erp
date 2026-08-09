@@ -34,6 +34,22 @@ test("request lines reject duplicate lots and processing outputs preserve catego
   assert.equal(output.varianceKg, 0);
 });
 
+test("multi-source request validation accepts Arrival, Reject, and Processed lots for one client", () => {
+  const base = { coffeeType: "Unwashed / UG", preparationType: "Repeat processing", grade: "Grade 1", requestedBags: 2, requestedKg: 100, certifications: [], specialInstruction: "", remark: "", clientDatabaseId: "client-1", availableBags: 10, availableKg: 600 };
+  const arrival = { ...base, lotDatabaseId: "arrival-1", lot: "LOT-A", sourceType: "ARRIVAL" };
+  const secondArrival = { ...base, lotDatabaseId: "arrival-2", lot: "LOT-A2", sourceType: "ARRIVAL" };
+  const reject = { ...base, lotDatabaseId: "reject-1", lot: "LOT-R", sourceType: "REJECT" };
+  const processed = { ...base, lotDatabaseId: "processed-1", lot: "LOT-P", sourceType: "PROCESSED" };
+
+  for (const combination of [[arrival], [reject], [processed], [arrival, secondArrival], [arrival, reject], [arrival, processed], [reject, processed], [arrival, reject, processed]]) {
+    assert.equal(validateProcessingRequestLines(combination).valid, true);
+  }
+  assert.equal(validateProcessingRequestLines([arrival, { ...reject, clientDatabaseId: "client-2" }]).valid, false);
+  assert.equal(validateProcessingRequestLines([{ ...arrival, requestedKg: 601 }]).valid, false);
+  assert.equal(validateProcessingRequestLines([{ ...arrival, requestedBags: 11 }]).valid, false);
+  assert.equal(validateProcessingRequestLines([arrival, { ...arrival }]).valid, false);
+});
+
 test("processing requests require approval before joining the queue", () => {
   const draft = { id: "REQ-1", noteNumber: "00240", requestDate: "2026-08-01", client: "Guji Specialty Coffee PLC", lot: "HYK/GEL/2026/0040", coffeeType: "Washed", preparationType: "Export preparation", grade: "Grade 1", requestedBags: 320, requestedKg: 19200, certifications: ["Organic"], otherCertification: "", requester: "Aster Kebede", checker: "Dawit Alemu", approver: "Meron Tadesse", notes: "", scannedDocumentAttached: true, status: "DRAFT" };
   assert.equal(validateProcessingRequest(draft).valid, true);
@@ -59,6 +75,4 @@ test("source lot category classification uses a strict positive allowlist", () =
   assert.equal(isCategoryEligible(undefined), false);
   assert.equal(isCategoryEligible("FUTURE_CATEGORY"), false);
 });
-
-
 

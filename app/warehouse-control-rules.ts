@@ -20,3 +20,11 @@ export function generatorActualCost(dieselLitres: number, unitCost: number) {
   if (dieselLitres <= 0 || unitCost <= 0) return 0;
   return Math.round(dieselLitres * unitCost * 100) / 100;
 }
+
+export function calculateLabourCharge(internalCostEtb: number, fixedAdditionEtb: number) {
+  if (internalCostEtb < 0 || fixedAdditionEtb < 0) return { valid: false, clientChargeEtb: 0 };
+  return {
+    valid: true,
+    clientChargeEtb: Math.round((internalCostEtb + fixedAdditionEtb) * 100) / 100,
+  };
+}

@@ -26,7 +26,7 @@ async function currentUserId() {
   return data.user.id;
 }
 
-type ClientRow = { id: string; code: string; legal_name: string; tin: string | null; active: boolean };
+export type ClientRow = { id: string; code: string; legal_name: string; tin: string | null; active: boolean };
 type AgreementRow = { id: string; client_id: string; agreement_number: string; effective_from: string; effective_to: string | null; tariff_version: string; status: string };
 type RepresentativeRow = { id: string; client_id: string; full_name: string; identity_number: string; phone: string | null; valid_from: string; valid_to: string | null; active: boolean };
 type WarehouseRow = { id: string; name: string };
@@ -39,9 +39,9 @@ type ReceiptRow = {
   bag_weight_kg: number | null; gross_weight_kg: number | null; tare_weight_kg: number | null;
   moisture_percent: number | null; wet_coffee: boolean;
 };
-type LotRow = { id: string; lot_number: string; receipt_id: string | null; client_id: string; coffee_type: "WASHED" | "UNWASHED_UG"; bag_count: number; quantity_kg: number; section: string; status: CoffeeLot["status"] };
+export type LotRow = { id: string; lot_number: string; receipt_id: string | null; client_id: string; coffee_type: "WASHED" | "UNWASHED_UG"; bag_count: number; quantity_kg: number; section: string; status: CoffeeLot["status"]; lot_category?: EligibleProcessingLot["lot_category"]; parent_lot_id?: string | null; source_processing_order_id?: string | null };
 type MovementRow = { id: string; lot_id: string; movement_type: StockMovement["type"]; quantity_kg: number; bag_delta: number; reference_id: string };
-type ProfileRow = { id: string; full_name: string; role: string; active: boolean };
+export type ProfileRow = { id: string; full_name: string; role: string; active: boolean };
 
 export type CoreClient = { id: string; code: string; name: string; tin: string; agreement: string; stock: string; status: string };
 export type CoreAgreement = { id: string; clientId: string; number: string; client: string; source: string; effective: string; effectiveFrom: string; expiry: string; effectiveTo: string | null; tariff: string; status: string };
@@ -56,6 +56,91 @@ export type CoreData = {
   lots: CoffeeLot[];
   movements: StockMovement[];
 };
+
+export type DashboardData = {
+  metrics: { label: string; value: number; unit: string; detail: string }[];
+  mini: { label: string; value: string; detail: string }[];
+  movements: { day: string; received: number; dispatched: number }[];
+  attention: { count: number; label: string; note: string; tone: "red" | "amber" }[];
+  activities: string[][];
+  pendingApprovals: number;
+};
+
+export async function loadDashboardData(): Promise<DashboardData> {
+  const db = createSupabaseClient();
+  const [lotResult, orderResult, movementResult, approvalResult, agreementResult, invoiceResult, auditResult, profileResult] = await Promise.all([
+    db.from("coffee_lots").select("id,lot_category,ownership_type,bag_count,quantity_kg,status"),
+    db.from("processing_orders").select("status,input_kg"),
+    db.from("stock_movements").select("movement_type,quantity_kg,occurred_at").order("occurred_at"),
+    db.from("approvals").select("request_type,status"),
+    db.from("agreements").select("status,effective_to"),
+    db.from("invoices").select("status"),
+    db.from("audit_events").select("action,reference_type,reference_id,event_data,occurred_at,actor_id").order("occurred_at", { ascending: false }).limit(8),
+    db.from("profiles").select("id,full_name"),
+  ]);
+  const lots = result(lotResult.data, lotResult.error) as { lot_category: string | null; ownership_type: string; bag_count: number; quantity_kg: number; status: string }[];
+  const orders = result(orderResult.data, orderResult.error) as { status: string; input_kg: number }[];
+  const movements = result(movementResult.data, movementResult.error) as { movement_type: string; quantity_kg: number; occurred_at: string }[];
+  const approvals = result(approvalResult.data, approvalResult.error) as { request_type: string; status: string }[];
+  const agreements = result(agreementResult.data, agreementResult.error) as { status: string; effective_to: string | null }[];
+  const invoices = result(invoiceResult.data, invoiceResult.error) as { status: string }[];
+  const audits = result(auditResult.data, auditResult.error) as { action: string; reference_type: string; reference_id: string; event_data: Record<string, unknown>; occurred_at: string; actor_id: string }[];
+  const profiles = result(profileResult.data, profileResult.error) as { id: string; full_name: string }[];
+  const activeLots = lots.filter((item) => Number(item.quantity_kg) > 0 && !["CLOSED", "DISPATCHED", "REVERSED"].includes(item.status));
+  const metric = (filter: (lot: typeof activeLots[number]) => boolean) => {
+    const rows = activeLots.filter(filter);
+    return { kg: rows.reduce((sum, item) => sum + Number(item.quantity_kg), 0), bags: rows.reduce((sum, item) => sum + item.bag_count, 0) };
+  };
+  const total = metric(() => true);
+  const arrival = metric((item) => item.lot_category === "ARRIVAL");
+  const processed = metric((item) => ["ACCEPTED_PROCESSED", "HAYKED_BYPRODUCT"].includes(item.lot_category ?? ""));
+  const rejects = metric((item) => item.lot_category === "CLIENT_REJECT");
+  const latestMovementDate = movements.at(-1)?.occurred_at.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
+  const end = new Date(`${latestMovementDate}T00:00:00Z`);
+  const movementDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(end);
+    date.setUTCDate(end.getUTCDate() - 6 + index);
+    const key = date.toISOString().slice(0, 10);
+    const rows = movements.filter((item) => item.occurred_at.slice(0, 10) === key);
+    return {
+      day: date.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" }),
+      received: rows.filter((item) => ["RECEIPT", "ECS_RECEIVE"].includes(item.movement_type)).reduce((sum, item) => sum + Math.max(0, Number(item.quantity_kg)), 0),
+      dispatched: Math.abs(rows.filter((item) => ["DISPATCH", "ECS_SEND"].includes(item.movement_type)).reduce((sum, item) => sum + Math.min(0, Number(item.quantity_kg)), 0)),
+    };
+  });
+  const today = new Date();
+  const inThirtyDays = new Date(today); inThirtyDays.setDate(today.getDate() + 30);
+  const pendingApprovals = approvals.filter((item) => item.status === "PENDING").length;
+  const profileById = new Map(profiles.map((item) => [item.id, item.full_name]));
+  return {
+    metrics: [
+      { label: "Total Coffee in Warehouse", value: total.kg, unit: "kg", detail: `${total.bags.toLocaleString()} bags` },
+      { label: "Arrival Coffee", value: arrival.kg, unit: "kg", detail: `${arrival.bags.toLocaleString()} bags` },
+      { label: "Processed Coffee", value: processed.kg, unit: "kg", detail: `${processed.bags.toLocaleString()} bags` },
+      { label: "Client Rejects", value: rejects.kg, unit: "kg", detail: `${rejects.bags.toLocaleString()} bags` },
+    ],
+    mini: [
+      { label: "Coffee in Processing", value: `${orders.filter((item) => item.status === "IN_PROCESS").reduce((sum, item) => sum + Number(item.input_kg), 0).toLocaleString()} kg`, detail: `${orders.filter((item) => item.status === "IN_PROCESS").length} active orders` },
+      { label: "Waiting for Processing", value: `${orders.filter((item) => item.status === "QUEUED").length} orders`, detail: `${orders.filter((item) => item.status === "QUEUED").reduce((sum, item) => sum + Number(item.input_kg), 0).toLocaleString()} kg queued` },
+      { label: "Awaiting Dispatch", value: `${activeLots.filter((item) => item.status === "AWAITING_DISPATCH").length} lots`, detail: "Approved stock ready for release checks" },
+      { label: "Hayked Byproducts", value: `${metric((item) => item.ownership_type === "HAYKED").kg.toLocaleString()} kg`, detail: "Separate ownership ledger" },
+    ],
+    movements: movementDays,
+    attention: [
+      { count: pendingApprovals, label: "Pending approvals", note: "Independent review queue", tone: "red" },
+      { count: agreements.filter((item) => item.status === "ACTIVE" && item.effective_to && new Date(item.effective_to) >= today && new Date(item.effective_to) <= inThirtyDays).length, label: "Agreements expiring", note: "Within the next 30 days", tone: "amber" },
+      { count: approvals.filter((item) => item.status === "PENDING" && item.request_type === "PROCESSING_EXCEPTION").length, label: "Processing exceptions", note: "Evidence and approval required", tone: "red" },
+      { count: invoices.filter((item) => ["ISSUED", "PARTIALLY_PAID"].includes(item.status)).length, label: "Open invoices", note: "Release requires payment or credit", tone: "amber" },
+    ],
+    activities: audits.map((item) => [
+      String(item.event_data?.business_reference ?? `${item.reference_type}-${item.reference_id.slice(0, 8)}`),
+      profileById.get(item.actor_id) ?? "Unknown user",
+      item.action.replaceAll("_", " "),
+      new Date(item.occurred_at).toLocaleString(),
+    ]),
+    pendingApprovals,
+  };
+}
 
 export async function loadCoreData(): Promise<CoreData> {
   const db = createSupabaseClient();
@@ -259,6 +344,8 @@ export type ProcessingRequestLineRow = { id: string; request_id: string; line_nu
 export type ProcessingOrderInputRow = { id: string; order_id: string; request_line_id: string | null; lot_id: string; input_bags: number; input_kg: number };
 export type ProcessingIntakeRow = { id: string; intake_number: string; order_id: string; intake_at: string; input_bags: number; input_kg: number; scale_reference: string; warehouse_issue_reference: string; machine_line: string; shift_name: string; received_by: string; client_monitor_present: boolean; client_monitor_name: string | null; intake_condition: string; evidence_path: string | null };
 export type ProcessingOutputRow = { id: string; order_id: string; line_number: number; category: ProcessingOutputLine["category"]; owner_type: "CLIENT" | "HAYKED" | "NONE"; coffee_type: "WASHED" | "UNWASHED_UG" | null; grade: string | null; preparation: string | null; bag_count: number; bag_weight_kg: number | null; quantity_kg: number; warehouse_section: string | null; certifications: ProcessingRequest["certifications"]; weighing_reference: string | null; evidence_path: string | null; reason: string | null; child_lot_id: string | null };
+export type ProcessingOutputSourceRow = { output_id: string; input_id: string };
+export type ProcessingReservationRow = { id: string; processing_order_id: string | null; lot_id: string; reserved_bags: number; reserved_kg: number; status: "ACTIVE" | "CONSUMED" | "RELEASED" };
 
 export type ProcessingData = {
   requests: ProcessingRequest[];
@@ -267,6 +354,8 @@ export type ProcessingData = {
   orderInputs: ProcessingOrderInputRow[];
   intakes: ProcessingIntakeRow[];
   outputs: ProcessingOutputRow[];
+  outputSources: ProcessingOutputSourceRow[];
+  reservations: ProcessingReservationRow[];
   clients: ClientRow[];
   lots: LotRow[];
   representatives: RepresentativeRow[];
@@ -276,15 +365,17 @@ export type ProcessingData = {
 
 export async function loadProcessingData(): Promise<ProcessingData> {
   const db = createSupabaseClient();
-  const [requestResult, orderResult, requestLineResult, orderInputResult, intakeResult, outputResult, clientResult, lotResult, representativeResult, profileResult, receiptResult] = await Promise.all([
+  const [requestResult, orderResult, requestLineResult, orderInputResult, intakeResult, outputResult, outputSourceResult, reservationResult, clientResult, lotResult, representativeResult, profileResult, receiptResult] = await Promise.all([
     db.from("processing_requests").select("*").order("created_at", { ascending: false }),
     db.from("processing_orders").select("id,order_number,completion_number,request_id,lot_id,client_id,queue_position,input_kg,status,accepted_client_kg,client_reject_kg,hayked_byproduct_kg,process_loss_kg,started_at,completed_at").order("queue_position"),
     db.from("processing_request_lines").select("*").order("line_number"),
     db.from("processing_order_inputs").select("*").order("created_at"),
     db.from("processing_intakes").select("*").order("intake_at", { ascending: false }),
     db.from("processing_outputs").select("*").order("line_number"),
+    db.from("processing_output_sources").select("output_id,input_id"),
+    db.from("stock_reservations").select("id,processing_order_id,lot_id,reserved_bags,reserved_kg,status").not("processing_order_id", "is", null).order("created_at"),
     db.from("clients").select("id,code,legal_name,tin,active"),
-    db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,bag_count,quantity_kg,section,status"),
+    db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,lot_category,parent_lot_id,source_processing_order_id,bag_count,quantity_kg,section,status"),
     db.from("authorized_representatives").select("id,client_id,full_name,identity_number,phone,valid_from,valid_to,active").order("full_name"),
     db.from("profiles").select("id,full_name,role,active").order("full_name"),
     db.from("warehouse_receipts").select("id,receipt_number,grade,origin,crop_year,bag_weight_kg"),
@@ -295,6 +386,8 @@ export async function loadProcessingData(): Promise<ProcessingData> {
   const orderInputs = result(orderInputResult.data as ProcessingOrderInputRow[] | null, orderInputResult.error);
   const intakes = result(intakeResult.data as ProcessingIntakeRow[] | null, intakeResult.error);
   const outputs = result(outputResult.data as ProcessingOutputRow[] | null, outputResult.error);
+  const outputSources = result(outputSourceResult.data as ProcessingOutputSourceRow[] | null, outputSourceResult.error);
+  const reservations = result(reservationResult.data as ProcessingReservationRow[] | null, reservationResult.error);
   const clients = result(clientResult.data as ClientRow[] | null, clientResult.error);
   const lots = result(lotResult.data as LotRow[] | null, lotResult.error);
   const representatives = result(representativeResult.data as RepresentativeRow[] | null, representativeResult.error);
@@ -312,7 +405,7 @@ export async function loadProcessingData(): Promise<ProcessingData> {
       scannedDocumentAttached: item.scanned_document_attached, status: item.status,
       queuedAs: item.queued_order_id ? orderById.get(item.queued_order_id)?.order_number : undefined,
     })),
-    orders, requestLines, orderInputs, intakes, outputs, clients, lots, representatives, profiles, receipts,
+    orders, requestLines, orderInputs, intakes, outputs, outputSources, reservations, clients, lots, representatives, profiles, receipts,
   };
 }
 
@@ -354,7 +447,7 @@ export async function completeProcessingOrder(id: string, lines: ProcessingOutpu
 
 export type DispatchRow = { id: string; dispatch_number: string; lot_id: string; client_id: string; representative_id: string; quantity_kg: number; bag_count: number; invoices_paid: boolean; credit_approved: boolean; documents_ready: boolean; weighbridge_ready: boolean; legal_or_quality_hold: boolean; status: string; prepared_by: string; approved_by: string | null; dispatch_date: string; dispatch_reason: string; destination: string | null; documents_reference: string | null; weighbridge_reference: string | null; notes: string | null; posted_at: string | null };
 export type DispatchLineRow = { id: string; dispatch_id: string; line_number: number; lot_id: string; bag_count: number; quantity_kg: number };
-export type StockReservationRow = { id: string; dispatch_id: string; lot_id: string; reserved_bags: number; reserved_kg: number; status: "ACTIVE" | "CONSUMED" | "RELEASED" };
+export type StockReservationRow = { id: string; dispatch_id: string | null; processing_order_id: string | null; lot_id: string; reserved_bags: number; reserved_kg: number; status: "ACTIVE" | "CONSUMED" | "RELEASED" };
 export type CreditOverrideRow = { id: string; dispatch_id: string; amount_etb: number; expires_on: string; reason: string; document_reference: string; status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED"; requested_by: string; decided_by: string | null };
 export type DispatchData = { dispatches: DispatchRow[]; lines: DispatchLineRow[]; reservations: StockReservationRow[]; credits: CreditOverrideRow[]; clients: ClientRow[]; lots: LotRow[]; representatives: RepresentativeRow[]; profiles: ProfileRow[]; agreements: { id: string; client_id: string; agreement_number: string; effective_from: string; effective_to: string; status: string }[] };
 
@@ -391,18 +484,39 @@ export async function decideCreditOverride(id: string, decision: "APPROVED" | "R
   if (error) throw new Error(error.message);
 }
 
-export type InvoiceRow = { id: string; invoice_number: string; subtotal_etb: number; tax_etb: number; total_etb: number; status: string; issued_on: string | null; due_on: string | null; line_snapshot: { description: string; quantity: number; rate_etb: number }[] };
-export type PaymentRow = { id: string; payment_number: string; invoice_id: string; amount_etb: number; bank_reference: string; paid_at: string; direction: string };
+export type InvoiceRow = { id: string; invoice_number: string; client_id: string; tariff_version: string; subtotal_etb: number; tax_etb: number; total_etb: number; status: string; issued_on: string | null; due_on: string | null; line_snapshot: { description: string; quantity: number; rate_etb: number }[] };
+export type PaymentRow = { id: string; payment_number: string; invoice_id: string; client_id: string; amount_etb: number; bank_reference: string; paid_at: string; direction: string };
+export type FinanceData = {
+  invoices: InvoiceRow[];
+  payments: PaymentRow[];
+  clients: ClientRow[];
+  lots: (LotRow & { received_at: string })[];
+  movements: { lot_id: string; bag_delta: number; occurred_at: string; reference_type: string }[];
+  tariffs: { id: string; version_code: string; description: string | null; effective_from: string; effective_to: string | null; active: boolean; verified_by_1: string | null; verified_by_2: string | null }[];
+  storageRuns: { id: string; duplicate_key: string; client_id: string; lot_id: string; run_number: string; total_amount: number; status: string }[];
+};
 
-export async function loadFinanceData() {
+export async function loadFinanceData(): Promise<FinanceData> {
   const db = createSupabaseClient();
-  const [invoiceResult, paymentResult] = await Promise.all([
-    db.from("invoices").select("id,invoice_number,subtotal_etb,tax_etb,total_etb,status,issued_on,due_on,line_snapshot").order("created_at", { ascending: false }),
-    db.from("payments").select("id,payment_number,invoice_id,amount_etb,bank_reference,paid_at,direction").order("paid_at", { ascending: false }),
+  const [invoiceResult, paymentResult, clientResult, lotResult, receiptResult, movementResult, tariffResult, storageRunResult] = await Promise.all([
+    db.from("invoices").select("id,invoice_number,client_id,tariff_version,subtotal_etb,tax_etb,total_etb,status,issued_on,due_on,line_snapshot").order("created_at", { ascending: false }),
+    db.from("payments").select("id,payment_number,invoice_id,client_id,amount_etb,bank_reference,paid_at,direction").order("paid_at", { ascending: false }),
+    db.from("clients").select("id,code,legal_name,tin,active").order("legal_name"),
+    db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,bag_count,quantity_kg,section,status").order("lot_number"),
+    db.from("warehouse_receipts").select("id,arrival_at"),
+    db.from("stock_movements").select("lot_id,bag_delta,occurred_at,reference_type").order("occurred_at"),
+    db.from("tariff_versions").select("id,version_code,description,effective_from,effective_to,active,verified_by_1,verified_by_2").order("effective_from", { ascending: false }),
+    db.from("storage_billing_runs").select("id,duplicate_key,client_id,lot_id,run_number,total_amount,status").order("created_at", { ascending: false }),
   ]);
+  const receiptDates = new Map((receiptResult.data ?? []).map((item) => [item.id, item.arrival_at]));
   return {
     invoices: result(invoiceResult.data as InvoiceRow[] | null, invoiceResult.error),
     payments: result(paymentResult.data as PaymentRow[] | null, paymentResult.error),
+    clients: result(clientResult.data as ClientRow[] | null, clientResult.error),
+    lots: result(lotResult.data as LotRow[] | null, lotResult.error).map((lot) => ({ ...lot, received_at: receiptDates.get(lot.receipt_id ?? "") ?? new Date().toISOString() })),
+    movements: result(movementResult.data as FinanceData["movements"] | null, movementResult.error),
+    tariffs: result(tariffResult.data as FinanceData["tariffs"] | null, tariffResult.error),
+    storageRuns: result(storageRunResult.data as FinanceData["storageRuns"] | null, storageRunResult.error),
   };
 }
 
@@ -411,7 +525,8 @@ export async function recordPayment(invoiceId: string, amount: number, bankRefer
   if (error) throw new Error(error.message);
 }
 
-export type ApprovalRow = { id: string; request_type: string; reference_id: string; business_reference?: string; requested_by: string; requested_at: string; status: string };
+export type ApprovalDetail = { title: string; client: string; status: string; fields: { label: string; value: string }[]; documentCount: number; auditCount: number };
+export type ApprovalRow = { id: string; request_type: string; reference_id: string; business_reference?: string; requested_by: string; requested_at: string; status: string; decided_by: string | null; decided_at: string | null; decision_note: string | null; detail?: ApprovalDetail };
 export type DocumentRow = { id: string; document_number: string; document_type: string; reference_type: string; reference_id: string; business_reference?: string; version: number; file_name: string; status: string };
 export type AuditRow = { id: string; actor_id: string; action: string; reference_type: string; reference_id: string; business_reference?: string; occurred_at: string };
 export type AdminUserRow = { id: string; email: string; full_name: string; role: string; active: boolean; last_sign_in_at: string | null };
@@ -420,14 +535,14 @@ export type BusinessReference = { id: string; type: string; label: string };
 export async function loadManagementData() {
   const db = createSupabaseClient();
   const [approvalResult, documentResult, auditResult, profileResult, receiptResult, requestResult, orderResult, dispatchResult, invoiceResult, lotResult, clientResult, adminUserResult] = await Promise.all([
-    db.from("approvals").select("id,request_type,reference_id,requested_by,requested_at,status").order("requested_at", { ascending: false }),
+    db.from("approvals").select("id,request_type,reference_id,requested_by,requested_at,status,decided_by,decided_at,decision_note").order("requested_at", { ascending: false }),
     db.from("documents").select("id,document_number,document_type,reference_type,reference_id,version,file_name,status").order("created_at", { ascending: false }),
     db.from("audit_events").select("id,actor_id,action,reference_type,reference_id,occurred_at").order("occurred_at", { ascending: false }),
     db.from("profiles").select("id,full_name,role,active").order("full_name"),
     db.from("warehouse_receipts").select("id,receipt_number"),
-    db.from("processing_requests").select("id,request_number"),
+    db.from("processing_requests").select("id,request_number,client_name,lot_reference,requested_kg,requested_bags,requested_preparation_type,status,notes"),
     db.from("processing_orders").select("id,order_number,completion_number"),
-    db.from("dispatch_orders").select("id,dispatch_number"),
+    db.from("dispatch_orders").select("id,dispatch_number,client_id,quantity_kg,bag_count,destination,status,documents_reference,weighbridge_reference,credit_approved"),
     db.from("invoices").select("id,invoice_number"),
     db.from("coffee_lots").select("id,lot_number"),
     db.from("clients").select("id,code,legal_name"),
@@ -443,9 +558,37 @@ export async function loadManagementData() {
   addReferences("INVOICE", (invoiceResult.data ?? []).map((item) => ({ id: item.id, label: item.invoice_number })));
   addReferences("COFFEE_LOT", (lotResult.data ?? []).map((item) => ({ id: item.id, label: item.lot_number })));
   addReferences("CLIENT", (clientResult.data ?? []).map((item) => ({ id: item.id, label: `${item.code} - ${item.legal_name}` })));
-  const approvals = result(approvalResult.data as ApprovalRow[] | null, approvalResult.error).map((item) => ({ ...item, business_reference: references.get(item.reference_id) ?? item.reference_id.slice(0, 8).toUpperCase() }));
   const documents = result(documentResult.data as DocumentRow[] | null, documentResult.error).map((item) => ({ ...item, business_reference: references.get(item.reference_id) ?? item.reference_id.slice(0, 8).toUpperCase() }));
   const audit = result(auditResult.data as AuditRow[] | null, auditResult.error).map((item) => ({ ...item, business_reference: references.get(item.reference_id) ?? item.reference_id.slice(0, 8).toUpperCase() }));
+  const clientNames = new Map((clientResult.data ?? []).map((item) => [item.id, item.legal_name]));
+  const details = new Map<string, Omit<ApprovalDetail, "documentCount" | "auditCount">>();
+  (requestResult.data ?? []).forEach((item) => details.set(item.id, {
+    title: item.request_number, client: item.client_name, status: item.status,
+    fields: [
+      { label: "Lot", value: item.lot_reference },
+      { label: "Preparation", value: item.requested_preparation_type },
+      { label: "Quantity", value: `${Number(item.requested_kg).toLocaleString()} kg / ${item.requested_bags} bags` },
+      { label: "Notes", value: item.notes || "-" },
+    ],
+  }));
+  (dispatchResult.data ?? []).forEach((item) => details.set(item.id, {
+    title: item.dispatch_number, client: clientNames.get(item.client_id) ?? "Unknown client", status: item.status,
+    fields: [
+      { label: "Quantity", value: `${Number(item.quantity_kg).toLocaleString()} kg / ${item.bag_count} bags` },
+      { label: "Destination", value: item.destination || "-" },
+      { label: "Documents", value: item.documents_reference || "Missing" },
+      { label: "Weighbridge", value: item.weighbridge_reference || "Missing" },
+      { label: "Credit cleared", value: item.credit_approved ? "Yes" : "No" },
+    ],
+  }));
+  const approvals = result(approvalResult.data as ApprovalRow[] | null, approvalResult.error).map((item) => {
+    const detail = details.get(item.reference_id);
+    return {
+      ...item,
+      business_reference: references.get(item.reference_id) ?? item.reference_id.slice(0, 8).toUpperCase(),
+      detail: detail ? { ...detail, documentCount: documents.filter((document) => document.reference_id === item.reference_id).length, auditCount: audit.filter((event) => event.reference_id === item.reference_id).length } : undefined,
+    };
+  });
   return {
     approvals,
     documents,
@@ -496,14 +639,90 @@ export async function loadOperationalReport(title: string) {
   return [headers.map(escape).join(","), ...rows.map((row) => headers.map((header) => escape(row[header])).join(","))].join("\n");
 }
 
-export async function decideApproval(id: string, decision: "APPROVED" | "REJECTED") {
-  const { error } = await createSupabaseClient().rpc("decide_approval", { approval_id: id, decision, note: "Decided in Administration" });
+export async function decideApproval(id: string, decision: "APPROVED" | "REJECTED", note: string) {
+  const { error } = await createSupabaseClient().rpc("decide_approval", { approval_id: id, decision, note });
   if (error) throw new Error(error.message);
 }
 
+export async function createAdminUser(input: { email: string; fullName: string; role: string; password: string }) {
+  const db = createSupabaseClient();
+  const { data } = await db.auth.getSession();
+  const response = await fetch("/api/admin/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${data.session?.access_token ?? ""}` },
+    body: JSON.stringify(input),
+  });
+  const payload = await response.json() as { error?: string };
+  if (!response.ok) throw new Error(payload.error ?? "User account could not be created.");
+}
+
 export async function updateProfile(id: string, role: string, active: boolean) {
-  const { error } = await createSupabaseClient().from("profiles").update({ role, active }).eq("id", id);
+  const { error } = await createSupabaseClient().rpc("update_admin_profile", { p_profile_id: id, p_role: role, p_active: active });
   if (error) throw new Error(error.message);
+}
+
+export type WarehouseControlData = {
+  clients: ClientRow[];
+  lots: LotRow[];
+  profiles: ProfileRow[];
+  processingOrders: { id: string; order_number: string; client_id: string; lot_id: string; status: string }[];
+  bagOrders: { id: string; order_number: string; client_id: string; lot_id: string | null; quantity: number; unit_rate: number; total_amount: number; status: string }[];
+  generatorRequests: { id: string; request_number: string; client_id: string; lot_id: string | null; processing_order_id: string | null; diesel_litres: number; unit_cost: number; total_cost: number; status: string }[];
+  labourSettings: { id: string; fixed_addition_etb: number; effective_from: string; effective_to: string | null; active: boolean }[];
+  labourRecords: { id: string; labour_number: string; work_date: string; client_id: string; lot_id: string | null; processing_order_id: string | null; dispatch_id: string | null; activity: string; quantity: number; unit_label: string; internal_cost_etb: number; charge_addition_etb: number; client_charge_etb: number; note: string | null; external_reference: string | null; service_event_id: string | null; created_at: string }[];
+};
+
+export async function loadWarehouseControlData(): Promise<WarehouseControlData> {
+  const db = createSupabaseClient();
+  const [clients, lots, profiles, processingOrders, bagOrders, generatorRequests, labourSettings, labourRecords] = await Promise.all([
+    db.from("clients").select("id,code,legal_name,tin,active").order("legal_name"),
+    db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,bag_count,quantity_kg,section,status").order("lot_number"),
+    db.from("profiles").select("id,full_name,role,active").order("full_name"),
+    db.from("processing_orders").select("id,order_number,client_id,lot_id,status").order("created_at", { ascending: false }),
+    db.from("bag_printing_orders").select("id,order_number,client_id,lot_id,quantity,unit_rate,total_amount,status").order("created_at", { ascending: false }),
+    db.from("generator_usage_requests").select("id,request_number,client_id,lot_id,processing_order_id,diesel_litres,unit_cost,total_cost,status").order("created_at", { ascending: false }),
+    db.from("labour_charge_settings").select("id,fixed_addition_etb,effective_from,effective_to,active").order("effective_from", { ascending: false }),
+    db.from("labour_records").select("id,labour_number,work_date,client_id,lot_id,processing_order_id,dispatch_id,activity,quantity,unit_label,internal_cost_etb,charge_addition_etb,client_charge_etb,note,external_reference,service_event_id,created_at").order("created_at", { ascending: false }),
+  ]);
+  return {
+    clients: result(clients.data as ClientRow[] | null, clients.error),
+    lots: result(lots.data as LotRow[] | null, lots.error),
+    profiles: result(profiles.data as ProfileRow[] | null, profiles.error),
+    processingOrders: result(processingOrders.data as WarehouseControlData["processingOrders"] | null, processingOrders.error),
+    bagOrders: result(bagOrders.data as WarehouseControlData["bagOrders"] | null, bagOrders.error),
+    generatorRequests: result(generatorRequests.data as WarehouseControlData["generatorRequests"] | null, generatorRequests.error),
+    labourSettings: result(labourSettings.data as WarehouseControlData["labourSettings"] | null, labourSettings.error),
+    labourRecords: result(labourRecords.data as WarehouseControlData["labourRecords"] | null, labourRecords.error),
+  };
+}
+
+export async function postLabourEntry(input: {
+  clientId: string;
+  workDate: string;
+  activity: string;
+  quantity: number;
+  unitLabel: string;
+  internalCostEtb: number;
+  lotId?: string | null;
+  processingOrderId?: string | null;
+  note?: string;
+  externalReference?: string;
+}) {
+  const { data, error } = await createSupabaseClient().rpc("post_labour_entry", {
+    p_client_id: input.clientId,
+    p_work_date: input.workDate,
+    p_activity: input.activity,
+    p_quantity: input.quantity,
+    p_unit_label: input.unitLabel,
+    p_internal_cost_etb: input.internalCostEtb,
+    p_lot_id: input.lotId ?? null,
+    p_processing_order_id: input.processingOrderId ?? null,
+    p_dispatch_id: null,
+    p_note: input.note ?? null,
+    p_external_reference: input.externalReference ?? null,
+  });
+  if (error) throw new Error(friendlyDatabaseError(error, "The labour entry could not be recorded."));
+  return data as { labour_number: string; internal_cost_etb: number; charge_addition_etb: number; client_charge_etb: number; service_event_id: string };
 }
 
 export async function postStorageLoss(input: {
@@ -544,14 +763,14 @@ export async function postBagPrintingOrder(input: {
 
 export async function postGeneratorRequest(input: {
   clientId: string;
-  lotId?: string | null;
+  processingOrderId: string;
   dieselLitres: number;
   unitCost: number;
   approvedBy: string;
 }) {
-  const { data, error } = await createSupabaseClient().rpc("post_generator_request", {
+  const { data, error } = await createSupabaseClient().rpc("post_generator_request_v2", {
     p_client_id: input.clientId,
-    p_lot_id: input.lotId ?? null,
+    p_processing_order_id: input.processingOrderId,
     p_diesel_litres: input.dieselLitres,
     p_unit_cost: input.unitCost,
     p_approved_by: input.approvedBy,
@@ -675,13 +894,19 @@ export type EligibleProcessingLot = {
   lot_id: string;
   lot_number: string;
   client_id: string;
+  client_name: string;
   lot_category: "ARRIVAL" | "ACCEPTED_PROCESSED" | "CLIENT_REJECT" | "HAYKED_BYPRODUCT" | "OTHER";
+  source_type: "ARRIVAL" | "REJECT" | "PROCESSED";
+  source_document: string | null;
   coffee_type: string;
+  origin: string | null;
   grade: string;
+  crop_year: number | null;
   section: string;
   bag_count: number;
   quantity_kg: number;
   reserved_kg: number;
+  reserved_bags: number;
   available_kg: number;
   available_bags: number;
   receipt_id?: string | null;
@@ -691,10 +916,13 @@ export type EligibleProcessingLot = {
   created_at: string;
 };
 
-export async function listEligibleProcessingLots(clientId: string): Promise<EligibleProcessingLot[]> {
+export async function listEligibleProcessingLots(clientId: string, sourceType?: EligibleProcessingLot["source_type"], search = "", limit = 10): Promise<EligibleProcessingLot[]> {
   if (!clientId) return [];
   const { data, error } = await createSupabaseClient().rpc("list_eligible_processing_lots", {
     p_client_id: clientId,
+    p_source_type: sourceType ?? null,
+    p_search: search || null,
+    p_limit: limit,
   });
   if (error) throw new Error(friendlyDatabaseError(error, "Failed to load eligible processing lots for client."));
   return (data ?? []) as EligibleProcessingLot[];
@@ -709,6 +937,3 @@ export async function validateProcessingSourceLot(lotId: string, clientId: strin
   if (error) throw new Error(friendlyDatabaseError(error, "Source lot validation failed."));
   return Boolean(data);
 }
-
-
-

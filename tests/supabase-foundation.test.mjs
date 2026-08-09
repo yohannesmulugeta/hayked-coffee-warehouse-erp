@@ -116,4 +116,79 @@ test("corrective migration removes unsafe default and enforces allowlist in star
   assert.doesNotMatch(sql, /service_role/i);
 });
 
+test("operational integrity repair makes stock and finance postings authoritative", () => {
+  const migration = readdirSync("supabase/migrations").find((name) => name.endsWith("_operational_integrity_repairs.sql"));
+  assert.ok(migration);
+  const sql = readFileSync(`supabase/migrations/${migration}`, "utf8");
+  const completion = sql.slice(sql.indexOf("create or replace function public.complete_processing_order_v2"), sql.indexOf("-- Storage loss"));
 
+  assert.match(sql, /drop function if exists public\.complete_processing_order_v2\(uuid, jsonb, jsonb\)/i);
+  assert.match(sql, /set quantity_kg = quantity_kg - v_input\.input_kg[\s\S]*bag_count = bag_count - v_input\.input_bags/i);
+  assert.doesNotMatch(completion, /'PROCESS_INPUT'/i);
+  assert.match(completion, /insert into public\.processing_outputs/i);
+  assert.match(completion, /PROCESSING_EXCEPTION/i);
+  assert.match(sql, /'REVERSED'\s*\)/i);
+  assert.match(sql, /'STORAGE_LOSS'.*'ECS_SEND'.*'ECS_RECEIVE'.*'OWNERSHIP_OUT'.*'OWNERSHIP_IN'/is);
+  assert.match(sql, /drop policy if exists "Staff access storage_losses"/i);
+  assert.match(sql, /revoke insert, update, delete on public\.storage_losses/i);
+  assert.match(sql, /Payment exceeds the outstanding invoice balance/i);
+  assert.match(sql, /status in \('ISSUED', 'PARTIALLY_PAID', 'PAID'\)/i);
+  assert.match(sql, /function public\.cancel_dispatch/i);
+  assert.match(sql, /valid_to is null or v_dispatch_date <= valid_to/i);
+  assert.doesNotMatch(sql, /service_role/i);
+});
+
+test("database lint repairs keep callable result types and storage rules aligned", () => {
+  const lintMigration = readdirSync("supabase/migrations").find((name) => name.endsWith("_database_lint_repairs.sql"));
+  const lossMigration = readdirSync("supabase/migrations").find((name) => name.endsWith("_storage_loss_rule_alignment.sql"));
+  assert.ok(lintMigration);
+  assert.ok(lossMigration);
+  const lintSql = readFileSync(`supabase/migrations/${lintMigration}`, "utf8");
+  const lossSql = readFileSync(`supabase/migrations/${lossMigration}`, "utf8");
+  assert.match(lintSql, /total_reserved_bags[\s\S]*::integer/i);
+  assert.match(lintSql, /lower\(p\.bank_reference\)/i);
+  assert.match(lintSql, /array\[\]::uuid\[\]/i);
+  assert.match(lossSql, /p_exception_approved_by = p_manager_approved_by/i);
+  assert.doesNotMatch(lossSql, /requires written joint approval/i);
+});
+
+test("admin and approval repair keeps decisions atomic and protects administrator access", () => {
+  const migration = readdirSync("supabase/migrations").find((name) => name.endsWith("_admin_and_approval_workflow.sql"));
+  assert.ok(migration);
+  const sql = readFileSync(`supabase/migrations/${migration}`, "utf8");
+  assert.match(sql, /function public\.update_admin_profile/i);
+  assert.match(sql, /At least one active system administrator is required/i);
+  assert.match(sql, /function public\.decide_approval/i);
+  assert.match(sql, /update public\.processing_requests[\s\S]*set status = decision/i);
+  assert.match(sql, /function public\.post_generator_request_v2/i);
+  assert.match(sql, /processing_order_id uuid references public\.processing_orders/i);
+  assert.doesNotMatch(sql, /service_role/i);
+});
+
+test("authoritative write boundary blocks direct ledger writes and public RPC execution", () => {
+  const migration = readdirSync("supabase/migrations").find((name) => name.endsWith("_authoritative_write_boundaries.sql"));
+  assert.ok(migration);
+  const sql = readFileSync(`supabase/migrations/${migration}`, "utf8");
+  assert.match(sql, /revoke insert, update, delete on public\.coffee_lots, public\.stock_movements/i);
+  assert.match(sql, /public\.processing_requests[\s\S]*public\.dispatch_orders[\s\S]*public\.invoices/i);
+  assert.match(sql, /where namespace\.nspname in \('public', 'private'\) and procedure\.prosecdef/i);
+  assert.match(sql, /revoke execute on function %I\.%I\(%s\) from public, anon/i);
+});
+
+test("processing traceability refinement shares reservations, preserves lineage, and freezes labour charges", () => {
+  const migration = readdirSync("supabase/migrations").find((name) => name.endsWith("_processing_traceability_labour_refinement.sql"));
+  assert.ok(migration);
+  const sql = readFileSync(`supabase/migrations/${migration}`, "utf8");
+
+  assert.match(sql, /add column processing_order_id uuid references public\.processing_orders/i);
+  assert.match(sql, /num_nonnulls\(dispatch_id, processing_order_id\) = 1/i);
+  assert.match(sql, /create table public\.processing_output_sources/i);
+  assert.match(sql, /create table public\.labour_charge_settings/i);
+  assert.match(sql, /create table public\.labour_records/i);
+  assert.match(sql, /client_charge_etb = internal_cost_etb \+ charge_addition_etb/i);
+  assert.match(sql, /function public\.list_eligible_processing_lots/i);
+  assert.match(sql, /function public\.post_labour_entry/i);
+  assert.match(sql, /Active processing reservation is missing or no longer matches lot/i);
+  assert.match(sql, /insert into public\.processing_output_sources/i);
+  assert.doesNotMatch(sql, /service_role/i);
+});
