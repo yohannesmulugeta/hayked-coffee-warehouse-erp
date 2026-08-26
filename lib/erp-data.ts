@@ -370,6 +370,7 @@ export type ProcessingIntakeRow = { id: string; intake_number: string; order_id:
 export type ProcessingOutputRow = { id: string; order_id: string; line_number: number; category: ProcessingOutputLine["category"]; owner_type: "CLIENT" | "HAYKED" | "NONE"; coffee_type: "WASHED" | "UNWASHED_UG" | null; grade: string | null; preparation: string | null; bag_count: number; bag_weight_kg: number | null; quantity_kg: number; warehouse_section: string | null; certifications: ProcessingRequest["certifications"]; weighing_reference: string | null; evidence_path: string | null; reason: string | null; child_lot_id: string | null };
 export type ProcessingOutputSourceRow = { output_id: string; input_id: string };
 export type ProcessingReservationRow = { id: string; processing_order_id: string | null; lot_id: string; reserved_bags: number; reserved_kg: number; status: "ACTIVE" | "CONSUMED" | "RELEASED" };
+export type EcxCheckRow = { id: string; check_number: string; processing_request_id: string; processing_order_id: string | null; client_id: string; lot_id: string | null; checked_on: string; result: "PENDING" | "PASSED" | "FAILED" | "NOT_REQUIRED"; reference_number: string | null; inspector_name: string | null; notes: string | null; created_at: string; updated_at: string };
 
 export type ProcessingData = {
   requests: ProcessingRequest[];
@@ -380,6 +381,7 @@ export type ProcessingData = {
   outputs: ProcessingOutputRow[];
   outputSources: ProcessingOutputSourceRow[];
   reservations: ProcessingReservationRow[];
+  ecxChecks: EcxCheckRow[];
   clients: ClientRow[];
   lots: LotRow[];
   representatives: RepresentativeRow[];
@@ -389,7 +391,7 @@ export type ProcessingData = {
 
 export async function loadProcessingData(): Promise<ProcessingData> {
   const db = createSupabaseClient();
-  const [requestResult, orderResult, requestLineResult, orderInputResult, intakeResult, outputResult, outputSourceResult, reservationResult, clientResult, lotResult, representativeResult, profileResult, receiptResult] = await Promise.all([
+  const [requestResult, orderResult, requestLineResult, orderInputResult, intakeResult, outputResult, outputSourceResult, reservationResult, ecxResult, clientResult, lotResult, representativeResult, profileResult, receiptResult] = await Promise.all([
     db.from("processing_requests").select("*").order("created_at", { ascending: false }),
     db.from("processing_orders").select("id,order_number,completion_number,request_id,lot_id,client_id,queue_position,input_kg,status,accepted_client_kg,client_reject_kg,hayked_byproduct_kg,process_loss_kg,started_at,completed_at").order("queue_position"),
     db.from("processing_request_lines").select("*").order("line_number"),
@@ -398,6 +400,7 @@ export async function loadProcessingData(): Promise<ProcessingData> {
     db.from("processing_outputs").select("*").order("line_number"),
     db.from("processing_output_sources").select("output_id,input_id"),
     db.from("stock_reservations").select("id,processing_order_id,lot_id,reserved_bags,reserved_kg,status").not("processing_order_id", "is", null).order("created_at"),
+    db.from("ecx_checks").select("id,check_number,processing_request_id,processing_order_id,client_id,lot_id,checked_on,result,reference_number,inspector_name,notes,created_at,updated_at").order("checked_on", { ascending: false }),
     db.from("clients").select("id,code,legal_name,tin,active"),
     db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,lot_category,parent_lot_id,source_processing_order_id,bag_count,quantity_kg,section,status"),
     db.from("authorized_representatives").select("id,client_id,full_name,identity_number,phone,valid_from,valid_to,active").order("full_name"),
@@ -412,6 +415,7 @@ export async function loadProcessingData(): Promise<ProcessingData> {
   const outputs = result(outputResult.data as ProcessingOutputRow[] | null, outputResult.error);
   const outputSources = result(outputSourceResult.data as ProcessingOutputSourceRow[] | null, outputSourceResult.error);
   const reservations = result(reservationResult.data as ProcessingReservationRow[] | null, reservationResult.error);
+  const ecxChecks = result(ecxResult.data as EcxCheckRow[] | null, ecxResult.error);
   const clients = result(clientResult.data as ClientRow[] | null, clientResult.error);
   const lots = result(lotResult.data as LotRow[] | null, lotResult.error);
   const representatives = result(representativeResult.data as RepresentativeRow[] | null, representativeResult.error);
@@ -429,7 +433,7 @@ export async function loadProcessingData(): Promise<ProcessingData> {
       scannedDocumentAttached: item.scanned_document_attached, status: item.status,
       queuedAs: item.queued_order_id ? orderById.get(item.queued_order_id)?.order_number : undefined,
     })),
-    orders, requestLines, orderInputs, intakes, outputs, outputSources, reservations, clients, lots, representatives, profiles, receipts,
+    orders, requestLines, orderInputs, intakes, outputs, outputSources, reservations, ecxChecks, clients, lots, representatives, profiles, receipts,
   };
 }
 
@@ -467,6 +471,21 @@ export async function completeProcessingOrder(id: string, lines: ProcessingOutpu
     p_exception_approved: exceptionApproved,
   });
   if (error) throw new Error(error.message);
+}
+
+export async function saveEcxCheck(input: { id?: string; processingRequestId: string; checkedOn: string; result: EcxCheckRow["result"]; referenceNumber?: string; inspectorName?: string; notes?: string }) {
+  const parameters = {
+    p_checked_on: input.checkedOn,
+    p_result: input.result,
+    p_reference_number: input.referenceNumber ?? null,
+    p_inspector_name: input.inspectorName ?? null,
+    p_notes: input.notes ?? null,
+  };
+  const { data, error } = input.id
+    ? await createSupabaseClient().rpc("update_ecx_check", { p_check_id: input.id, ...parameters })
+    : await createSupabaseClient().rpc("create_ecx_check", { p_processing_request_id: input.processingRequestId, ...parameters });
+  if (error) throw new Error(friendlyDatabaseError(error, "The ECX check could not be saved."));
+  return data as EcxCheckRow;
 }
 
 export type DispatchRow = { id: string; dispatch_number: string; lot_id: string; client_id: string; representative_id: string; quantity_kg: number; bag_count: number; invoices_paid: boolean; credit_approved: boolean; documents_ready: boolean; weighbridge_ready: boolean; legal_or_quality_hold: boolean; status: string; prepared_by: string; approved_by: string | null; dispatch_date: string; dispatch_reason: string; destination: string | null; documents_reference: string | null; weighbridge_reference: string | null; notes: string | null; posted_at: string | null };
@@ -549,31 +568,37 @@ export async function loadFinanceData(): Promise<FinanceData> {
 }
 
 export async function recordPayment(invoiceId: string, amount: number, bankReference: string) {
-  const { error } = await createSupabaseClient().rpc("record_invoice_payment", { invoice_id: invoiceId, amount_etb: amount, bank_reference: bankReference });
+  const { data, error } = await createSupabaseClient().rpc("record_invoice_payment", { invoice_id: invoiceId, amount_etb: amount, bank_reference: bankReference });
   if (error) throw new Error(error.message);
+  return data as { id: string; payment_number: string; invoice_status: string };
 }
 
 export type ApprovalDetail = { title: string; client: string; status: string; fields: { label: string; value: string }[]; documentCount: number; auditCount: number };
 export type ApprovalRow = { id: string; request_type: string; reference_id: string; business_reference?: string; requested_by: string; requested_at: string; status: string; decided_by: string | null; decided_at: string | null; decision_note: string | null; detail?: ApprovalDetail };
-export type DocumentRow = { id: string; document_number: string; document_type: string; reference_type: string; reference_id: string; business_reference?: string; version: number; file_name: string; status: string };
-export type AuditRow = { id: string; actor_id: string; action: string; reference_type: string; reference_id: string; business_reference?: string; occurred_at: string };
+export type DocumentRow = { id: string; document_number: string; document_type: string; reference_type: string; reference_id: string; business_reference?: string; version: number; object_path: string; file_name: string; mime_type: string; size_bytes: number; status: string; created_at: string };
+export type AuditRow = { id: string; actor_id: string; action: string; reference_type: string; reference_id: string; business_reference?: string; occurred_at: string; event_data: Record<string, unknown> };
 export type AdminUserRow = { id: string; email: string; full_name: string; role: string; active: boolean; last_sign_in_at: string | null };
 export type BusinessReference = { id: string; type: string; label: string };
+export type ArrearsCaseRow = { id: string; case_number: string; client_id: string; invoice_id: string; stage: string; outstanding_etb: number; opened_on: string; oldest_due_on: string | null; next_action_on: string | null; assigned_to: string | null; notes: string | null; closed_at: string | null; created_at: string; updated_at: string };
+export type ArrearsEventRow = { id: string; case_id: string; from_stage: string | null; to_stage: string; note: string; action_by: string; created_at: string };
 
 export async function loadManagementData() {
   const db = createSupabaseClient();
-  const [approvalResult, documentResult, auditResult, profileResult, receiptResult, requestResult, orderResult, dispatchResult, invoiceResult, lotResult, clientResult, adminUserResult] = await Promise.all([
+  const [approvalResult, documentResult, auditResult, profileResult, receiptResult, requestResult, orderResult, dispatchResult, invoiceResult, paymentResult, lotResult, clientResult, arrearsResult, arrearsEventResult, adminUserResult] = await Promise.all([
     db.from("approvals").select("id,request_type,reference_id,requested_by,requested_at,status,decided_by,decided_at,decision_note").order("requested_at", { ascending: false }),
-    db.from("documents").select("id,document_number,document_type,reference_type,reference_id,version,file_name,status").order("created_at", { ascending: false }),
-    db.from("audit_events").select("id,actor_id,action,reference_type,reference_id,occurred_at").order("occurred_at", { ascending: false }),
+    db.from("documents").select("id,document_number,document_type,reference_type,reference_id,version,object_path,file_name,mime_type,size_bytes,status,created_at").order("created_at", { ascending: false }),
+    db.from("audit_events").select("id,actor_id,action,reference_type,reference_id,occurred_at,event_data").order("occurred_at", { ascending: false }),
     db.from("profiles").select("id,full_name,role,active").order("full_name"),
     db.from("warehouse_receipts").select("id,receipt_number"),
     db.from("processing_requests").select("id,request_number,client_name,lot_reference,requested_kg,requested_bags,requested_preparation_type,status,notes"),
     db.from("processing_orders").select("id,order_number,completion_number"),
     db.from("dispatch_orders").select("id,dispatch_number,client_id,quantity_kg,bag_count,destination,status,documents_reference,weighbridge_reference,credit_approved"),
-    db.from("invoices").select("id,invoice_number"),
+    db.from("invoices").select("id,invoice_number,client_id,status,total_etb,issued_on,due_on"),
+    db.from("payments").select("id,payment_number,invoice_id,client_id,amount_etb,paid_at,bank_reference,direction"),
     db.from("coffee_lots").select("id,lot_number"),
     db.from("clients").select("id,code,legal_name"),
+    db.from("arrears_cases").select("id,case_number,client_id,invoice_id,stage,outstanding_etb,opened_on,oldest_due_on,next_action_on,assigned_to,notes,closed_at,created_at,updated_at").order("created_at", { ascending: false }),
+    db.from("arrears_case_events").select("id,case_id,from_stage,to_stage,note,action_by,created_at").order("created_at", { ascending: false }),
     db.rpc("list_admin_users"),
   ]);
   const references = new Map<string, string>();
@@ -584,6 +609,7 @@ export async function loadManagementData() {
   addReferences("PROCESSING_ORDER", (orderResult.data ?? []).map((item) => ({ id: item.id, label: item.completion_number ?? item.order_number })));
   addReferences("DISPATCH_ORDER", (dispatchResult.data ?? []).map((item) => ({ id: item.id, label: item.dispatch_number })));
   addReferences("INVOICE", (invoiceResult.data ?? []).map((item) => ({ id: item.id, label: item.invoice_number })));
+  addReferences("PAYMENT", (paymentResult.data ?? []).map((item) => ({ id: item.id, label: item.payment_number })));
   addReferences("COFFEE_LOT", (lotResult.data ?? []).map((item) => ({ id: item.id, label: item.lot_number })));
   addReferences("CLIENT", (clientResult.data ?? []).map((item) => ({ id: item.id, label: `${item.code} - ${item.legal_name}` })));
   const documents = result(documentResult.data as DocumentRow[] | null, documentResult.error).map((item) => ({ ...item, business_reference: references.get(item.reference_id) ?? item.reference_id.slice(0, 8).toUpperCase() }));
@@ -625,6 +651,10 @@ export async function loadManagementData() {
     adminUsers: adminUserResult.error ? [] : adminUserResult.data as AdminUserRow[],
     businessReferences,
     clients: clientResult.data ?? [],
+    invoices: invoiceResult.data ?? [],
+    payments: paymentResult.data ?? [],
+    arrearsCases: result(arrearsResult.data as ArrearsCaseRow[] | null, arrearsResult.error),
+    arrearsEvents: result(arrearsEventResult.data as ArrearsEventRow[] | null, arrearsEventResult.error),
   };
 }
 
@@ -649,6 +679,34 @@ export async function uploadBusinessDocument(file: File, documentType: string, r
   return documentNumber;
 }
 
+export async function getBusinessDocumentUrl(objectPath: string) {
+  const { data, error } = await createSupabaseClient().storage.from("erp-documents").createSignedUrl(objectPath, 60);
+  if (error) throw new Error(error.message);
+  return data.signedUrl;
+}
+
+export async function createArrearsCase(invoiceId: string, note: string, nextActionOn?: string) {
+  const { data, error } = await createSupabaseClient().rpc("create_arrears_case", {
+    p_invoice_id: invoiceId,
+    p_next_action_on: nextActionOn || null,
+    p_assigned_to: null,
+    p_note: note,
+  });
+  if (error) throw new Error(friendlyDatabaseError(error, "The arrears case could not be opened."));
+  return data as ArrearsCaseRow;
+}
+
+export async function advanceSavedArrearsCase(id: string, targetStage: string, note: string, nextActionOn?: string) {
+  const { data, error } = await createSupabaseClient().rpc("advance_arrears_case", {
+    p_case_id: id,
+    p_target_stage: targetStage,
+    p_note: note,
+    p_next_action_on: nextActionOn || null,
+  });
+  if (error) throw new Error(friendlyDatabaseError(error, "The arrears stage could not be saved."));
+  return data as ArrearsCaseRow;
+}
+
 export async function loadOperationalReport(title: string) {
   const db = createSupabaseClient();
   const query = title === "Current stock position"
@@ -668,7 +726,7 @@ export async function loadOperationalReport(title: string) {
   return [headers.map(escape).join(","), ...rows.map((row) => headers.map((header) => escape(row[header])).join(","))].join("\n");
 }
 
-export type ReportType = "Stock" | "Receipts" | "Processing" | "Dispatch" | "Billing";
+export type ReportType = "Stock" | "Receipts" | "Processing" | "Dispatch" | "Billing" | "Storage Loss" | "Bags" | "Labour" | "Generator" | "Arrears" | "Documents" | "Audit";
 export type ReportTable = { columns: string[]; rows: { id: string; clientId: string; date: string; values: string[] }[] };
 
 export async function loadReportTable(type: ReportType, filters: { from: string; to: string; clientId: string }): Promise<ReportTable> {
@@ -717,6 +775,75 @@ export async function loadReportTable(type: ReportType, filters: { from: string;
     const { data, error } = await query;
     const rows = result(data, error) as { id: string; dispatch_number: string; client_id: string; dispatch_date: string; destination: string | null; bag_count: number; quantity_kg: number; status: string }[];
     return { columns: ["Date", "Dispatch", "Client", "Destination", "Bags", "KG", "Status"], rows: rows.map((row) => ({ id: row.id, clientId: row.client_id, date: row.dispatch_date, values: [row.dispatch_date, row.dispatch_number, clientName(row.client_id), row.destination ?? "-", String(row.bag_count), Number(row.quantity_kg).toLocaleString(), row.status.replaceAll("_", " ")] })) };
+  }
+
+  if (type === "Storage Loss") {
+    let query = db.from("storage_losses").select("id,lot_id,measured_balance_kg,loss_kg,loss_percent,status,created_at").order("created_at", { ascending: false });
+    if (filters.from) query = query.gte("created_at", `${filters.from}T00:00:00`);
+    if (filters.to) query = query.lte("created_at", `${filters.to}T23:59:59`);
+    const [{ data, error }, lotsResult] = await Promise.all([query, db.from("coffee_lots").select("id,lot_number,client_id")]);
+    const lotById = new Map((lotsResult.data ?? []).map((lot) => [lot.id, lot]));
+    const rows = (result(data, error) as { id: string; lot_id: string; measured_balance_kg: number; loss_kg: number; loss_percent: number; status: string; created_at: string }[]).filter((row) => !filters.clientId || lotById.get(row.lot_id)?.client_id === filters.clientId);
+    return { columns: ["Date", "Client", "Lot", "Measured KG", "Loss KG", "Loss %", "Status"], rows: rows.map((row) => { const lot = lotById.get(row.lot_id); return { id: row.id, clientId: lot?.client_id ?? "", date: row.created_at.slice(0, 10), values: [row.created_at.slice(0, 10), clientName(lot?.client_id ?? ""), lot?.lot_number ?? "-", Number(row.measured_balance_kg).toLocaleString(), Number(row.loss_kg).toLocaleString(), `${Number(row.loss_percent).toFixed(2)}%`, row.status.replaceAll("_", " ")] }; }) };
+  }
+
+  if (type === "Bags") {
+    let query = db.from("bag_printing_orders").select("id,order_number,client_id,quantity,unit_rate,total_amount,status,created_at").order("created_at", { ascending: false });
+    if (filters.from) query = query.gte("created_at", `${filters.from}T00:00:00`);
+    if (filters.to) query = query.lte("created_at", `${filters.to}T23:59:59`);
+    if (filters.clientId) query = query.eq("client_id", filters.clientId);
+    const { data, error } = await query;
+    const rows = result(data, error) as { id: string; order_number: string; client_id: string; quantity: number; unit_rate: number; total_amount: number; status: string; created_at: string }[];
+    return { columns: ["Date", "Order", "Client", "Bags", "Rate", "Amount", "Status"], rows: rows.map((row) => ({ id: row.id, clientId: row.client_id, date: row.created_at.slice(0, 10), values: [row.created_at.slice(0, 10), row.order_number, clientName(row.client_id), Number(row.quantity).toLocaleString(), `ETB ${Number(row.unit_rate).toLocaleString()}`, `ETB ${Number(row.total_amount).toLocaleString()}`, row.status.replaceAll("_", " ")] })) };
+  }
+
+  if (type === "Labour") {
+    let query = db.from("labour_records").select("id,labour_number,work_date,client_id,activity,quantity,unit_label,internal_cost_etb,client_charge_etb,service_event_id").order("work_date", { ascending: false });
+    if (filters.from) query = query.gte("work_date", filters.from);
+    if (filters.to) query = query.lte("work_date", filters.to);
+    if (filters.clientId) query = query.eq("client_id", filters.clientId);
+    const { data, error } = await query;
+    const rows = result(data, error) as { id: string; labour_number: string; work_date: string; client_id: string; activity: string; quantity: number; unit_label: string; internal_cost_etb: number; client_charge_etb: number; service_event_id: string | null }[];
+    return { columns: ["Date", "Reference", "Client", "Activity", "Quantity", "Internal Cost", "Client Charge", "Billing"], rows: rows.map((row) => ({ id: row.id, clientId: row.client_id, date: row.work_date, values: [row.work_date, row.labour_number, clientName(row.client_id), row.activity, `${Number(row.quantity).toLocaleString()} ${row.unit_label}`, `ETB ${Number(row.internal_cost_etb).toLocaleString()}`, `ETB ${Number(row.client_charge_etb).toLocaleString()}`, row.service_event_id ? "Ready" : "Not linked"] })) };
+  }
+
+  if (type === "Generator") {
+    let query = db.from("generator_usage_requests").select("id,request_number,client_id,diesel_litres,unit_cost,total_cost,status,created_at").order("created_at", { ascending: false });
+    if (filters.from) query = query.gte("created_at", `${filters.from}T00:00:00`);
+    if (filters.to) query = query.lte("created_at", `${filters.to}T23:59:59`);
+    if (filters.clientId) query = query.eq("client_id", filters.clientId);
+    const { data, error } = await query;
+    const rows = result(data, error) as { id: string; request_number: string; client_id: string; diesel_litres: number; unit_cost: number; total_cost: number; status: string; created_at: string }[];
+    return { columns: ["Date", "Request", "Client", "Diesel L", "Unit Cost", "Total", "Status"], rows: rows.map((row) => ({ id: row.id, clientId: row.client_id, date: row.created_at.slice(0, 10), values: [row.created_at.slice(0, 10), row.request_number, clientName(row.client_id), Number(row.diesel_litres).toLocaleString(), `ETB ${Number(row.unit_cost).toLocaleString()}`, `ETB ${Number(row.total_cost).toLocaleString()}`, row.status.replaceAll("_", " ")] })) };
+  }
+
+  if (type === "Arrears") {
+    let query = db.from("arrears_cases").select("id,case_number,client_id,stage,outstanding_etb,opened_on,oldest_due_on,next_action_on").order("opened_on", { ascending: false });
+    if (filters.from) query = query.gte("opened_on", filters.from);
+    if (filters.to) query = query.lte("opened_on", filters.to);
+    if (filters.clientId) query = query.eq("client_id", filters.clientId);
+    const { data, error } = await query;
+    const rows = result(data, error) as { id: string; case_number: string; client_id: string; stage: string; outstanding_etb: number; opened_on: string; oldest_due_on: string | null; next_action_on: string | null }[];
+    return { columns: ["Opened", "Case", "Client", "Outstanding", "Oldest Due", "Next Action", "Stage"], rows: rows.map((row) => ({ id: row.id, clientId: row.client_id, date: row.opened_on, values: [row.opened_on, row.case_number, clientName(row.client_id), `ETB ${Number(row.outstanding_etb).toLocaleString()}`, row.oldest_due_on ?? "-", row.next_action_on ?? "-", row.stage.replaceAll("_", " ")] })) };
+  }
+
+  if (type === "Documents") {
+    let query = db.from("documents").select("id,document_number,document_type,reference_type,version,file_name,status,created_at").order("created_at", { ascending: false });
+    if (filters.from) query = query.gte("created_at", `${filters.from}T00:00:00`);
+    if (filters.to) query = query.lte("created_at", `${filters.to}T23:59:59`);
+    const { data, error } = await query;
+    const rows = result(data, error) as { id: string; document_number: string; document_type: string; reference_type: string; version: number; file_name: string; status: string; created_at: string }[];
+    return { columns: ["Date", "Document", "Type", "Linked Record", "Version", "File", "Status"], rows: rows.map((row) => ({ id: row.id, clientId: "", date: row.created_at.slice(0, 10), values: [row.created_at.slice(0, 10), row.document_number, row.document_type.replaceAll("_", " "), row.reference_type.replaceAll("_", " "), `v${row.version}`, row.file_name, row.status.replaceAll("_", " ")] })) };
+  }
+
+  if (type === "Audit") {
+    let query = db.from("audit_events").select("id,actor_id,action,reference_type,reference_id,occurred_at").order("occurred_at", { ascending: false });
+    if (filters.from) query = query.gte("occurred_at", `${filters.from}T00:00:00`);
+    if (filters.to) query = query.lte("occurred_at", `${filters.to}T23:59:59`);
+    const [{ data, error }, profileResult] = await Promise.all([query, db.from("profiles").select("id,full_name")]);
+    const profileById = new Map((profileResult.data ?? []).map((profile) => [profile.id, profile.full_name]));
+    const rows = result(data, error) as { id: string; actor_id: string; action: string; reference_type: string; reference_id: string; occurred_at: string }[];
+    return { columns: ["Date & Time", "User", "Module", "Action", "Reference"], rows: rows.map((row) => ({ id: row.id, clientId: "", date: row.occurred_at.slice(0, 10), values: [new Date(row.occurred_at).toLocaleString(), profileById.get(row.actor_id) ?? "Unknown user", row.reference_type.replaceAll("_", " "), row.action.replaceAll("_", " "), row.reference_id.slice(0, 8).toUpperCase()] })) };
   }
 
   let query = db.from("invoices").select("id,invoice_number,client_id,issued_on,total_etb,status").order("issued_on", { ascending: false });
@@ -814,7 +941,10 @@ export async function postLabourEntry(input: {
     p_external_reference: input.externalReference ?? null,
   });
   if (error) throw new Error(friendlyDatabaseError(error, "The labour entry could not be recorded."));
-  return data as { labour_number: string; internal_cost_etb: number; charge_addition_etb: number; client_charge_etb: number; service_event_id: string };
+  const posted = data as { labour_number: string; internal_cost_etb: number; charge_addition_etb: number; client_charge_etb: number; service_event_id: string };
+  const record = await createSupabaseClient().from("labour_records").select("id").eq("labour_number", posted.labour_number).maybeSingle();
+  if (record.error || !record.data) throw new Error(friendlyDatabaseError(record.error, "The labour entry was posted but its document link could not be prepared."));
+  return { ...posted, id: record.data.id as string };
 }
 
 export async function postStorageLoss(input: {

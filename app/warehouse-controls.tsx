@@ -4,16 +4,18 @@ import { AlertTriangle, Archive, Banknote, Check, Droplets, Fuel, Plus, Printer,
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { bagPrintingQuote, calculateLabourCharge, evaluateStorageLoss, generatorActualCost } from "./warehouse-control-rules";
 import { loadWarehouseControlData, postBagPrintingOrder, postGeneratorRequest, postLabourEntry, postStorageLoss, type WarehouseControlData } from "@/lib/erp-data";
+import { EvidenceUploader } from "./workflow-ui";
 
 export const warehouseControlViews = ["Storage Loss", "Bag Control", "Labour", "Generator Requests"];
 
 function Status({ value }: { value: string }) { return <span className={`status-pill ${value.toLowerCase().replaceAll("_", "-")}`}>{value.replaceAll("_", " ")}</span>; }
-function Header({ label, title, copy }: { label: string; title: string; copy: string }) { return <section className="module-heading"><div><span className="demo-label">{label}</span><h1>{title}</h1><p>{copy}</p></div></section>; }
+function Header({ label, title, copy, onReports }: { label: string; title: string; copy: string; onReports?: () => void }) { return <section className="module-heading"><div><span className="demo-label">{label}</span><h1>{title}</h1><p>{copy}</p></div>{onReports && <button className="secondary-button" type="button" onClick={onReports}>View in Reports</button>}</section>; }
 
-export function WarehouseControls({ activeView }: { activeView: string }) {
+export function WarehouseControls({ activeView, onNavigate }: { activeView: string; onNavigate?: (intent: { view: string }) => void }) {
   const [message, setMessage] = useState("");
   const [databaseError, setDatabaseError] = useState("");
   const [data, setData] = useState<WarehouseControlData | null>(null);
+  const [lastEvidence, setLastEvidence] = useState<{ type: string; id: string; label: string; documentType: string; title: string } | null>(null);
   const [lossClientId, setLossClientId] = useState("");
   const [lossLotId, setLossLotId] = useState("");
   const [measuredQuantity, setMeasuredQuantity] = useState(0);
@@ -78,6 +80,7 @@ export function WarehouseControls({ activeView }: { activeView: string }) {
     try {
       const id = await postStorageLoss({ lotId: lossLotId, lossKg, evidenceAttached: lossChecks.evidence, managerApprovedBy: lossManagerId, exceptionApprovedBy: lossExceptionApproverId || null, wetCoffeeJointApproved: lossChecks.jointApprovalAttached });
       await reload();
+      setLastEvidence({ type: "STORAGE_LOSS", id, label: id.slice(0, 8).toUpperCase(), documentType: "STORAGE_LOSS_EVIDENCE", title: "Measurement evidence" });
       setMessage(`Storage loss ${id.slice(0, 8).toUpperCase()} posted for ${selectedLossLot?.lot_number}. The attached measurement evidence must record the ${lossCause.toLowerCase()} cause.`);
       setLossLotId(""); setMeasuredQuantity(0); setLossManagerId(""); setLossExceptionApproverId(""); setLossChecks({ evidence: false, jointApprovalAttached: false });
     } catch (error) { setMessage(error instanceof Error ? error.message : "Storage loss could not be posted."); }
@@ -88,7 +91,8 @@ export function WarehouseControls({ activeView }: { activeView: string }) {
     if (!printQuote.valid) { setMessage("Bag printing requires at least 50 bags."); return; }
     if (!printClientId || !printApproverId) { setMessage("Select the client and independent approver."); return; }
     try {
-      await postBagPrintingOrder({ clientId: printClientId, lotId: printLotId || null, quantity: printQuantity, approvedBy: printApproverId });
+      const id = await postBagPrintingOrder({ clientId: printClientId, lotId: printLotId || null, quantity: printQuantity, approvedBy: printApproverId });
+      setLastEvidence({ type: "BAG_PRINTING_ORDER", id, label: id.slice(0, 8).toUpperCase(), documentType: "BAG_ORDER_EVIDENCE", title: "Bag order evidence" });
       await reload(); setMessage("Bag printing order posted and added to unbilled service events.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Bag printing order could not be posted."); }
   }
@@ -99,6 +103,7 @@ export function WarehouseControls({ activeView }: { activeView: string }) {
     try {
       const posted = await postLabourEntry({ clientId: labourClientId, workDate: labourDate, activity: labourActivity, quantity: labourQuantity, unitLabel: labourUnit, internalCostEtb: labourInternal, lotId: labourLotId || null, processingOrderId: labourOrderId || null, note: labourNote, externalReference: labourReference });
       await reload();
+      setLastEvidence({ type: "LABOUR_RECORD", id: posted.id, label: posted.labour_number, documentType: "LABOUR_EVIDENCE", title: "Labour voucher or evidence" });
       setMessage(`${posted.labour_number} recorded. Internal cost ETB ${Number(posted.internal_cost_etb).toLocaleString()} and client service charge ETB ${Number(posted.client_charge_etb).toLocaleString()} remain separate.`);
       setLabourNote(""); setLabourReference("");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Labour entry could not be recorded."); }
@@ -109,12 +114,15 @@ export function WarehouseControls({ activeView }: { activeView: string }) {
     if (!generatorChecks.receipt || !generatorChecks.supervisor || !generatorChecks.finance) { setMessage("Supplier receipt, supervisor approval, and finance review are required."); return; }
     if (!generatorClientId || !generatorOrderId || !generatorApproverId) { setMessage("Select the client, processing order, and independent approver."); return; }
     try {
-      await postGeneratorRequest({ clientId: generatorClientId, processingOrderId: generatorOrderId, dieselLitres, unitCost: dieselUnitCost, approvedBy: generatorApproverId });
+      const id = await postGeneratorRequest({ clientId: generatorClientId, processingOrderId: generatorOrderId, dieselLitres, unitCost: dieselUnitCost, approvedBy: generatorApproverId });
+      setLastEvidence({ type: "GENERATOR_REQUEST", id, label: id.slice(0, 8).toUpperCase(), documentType: "GENERATOR_RECEIPT", title: "Supplier receipt" });
       await reload(); setMessage("Generator recovery posted against the selected processing order.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Generator request could not be posted."); }
   }
 
-  const notice = message && <div className="operation-message" role="status"><Check size={17} />{message}<button type="button" onClick={() => setMessage("")}>Close</button></div>;
+  const evidence = lastEvidence && <section className="post-save-evidence"><EvidenceUploader reference={{ type: lastEvidence.type, id: lastEvidence.id, label: lastEvidence.label }} documentType={lastEvidence.documentType} label={lastEvidence.title} help="Add the supporting PDF, JPG, or PNG while this record is still in front of you." /></section>;
+  const reportAction = () => onNavigate?.({ view: "Reports" });
+  const notice = <>{message && <div className="operation-message" role="status"><Check size={17} />{message}<button type="button" onClick={() => setMessage("")}>Close</button></div>}<div className="warehouse-quick-actions"><button className="secondary-button" type="button" onClick={reportAction}>View this in Reports</button></div>{evidence}</>;
 
   if (databaseError && !data) return <div className="module-page"><Header label="WAREHOUSE CONTROL" title={activeView} copy="Operational data must come from the warehouse database." /><section className="database-unavailable" role="alert"><AlertTriangle size={26} /><h2>Database unavailable</h2><p>Unable to load warehouse data. No demo values are being shown.</p><small>{databaseError}</small><button className="primary-button" type="button" onClick={() => void reload()}>Retry database connection</button></section></div>;
 
