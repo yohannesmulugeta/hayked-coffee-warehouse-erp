@@ -52,7 +52,8 @@ test("client onboarding and stock views retain the required daily controls", asy
   assert.match(source, /Client details/);
   assert.match(source, /Agreement/);
   assert.match(source, /Authorized representatives/);
-  assert.match(source, /Add Representative/);
+  assert.match(source, /Add representative/i);
+  assert.match(source, /createClientSetup/);
   assert.match(source, /<span>Type<\/span>/);
   assert.match(source, /<span>Status<\/span>/);
   assert.match(source, /stockMatches/);
@@ -74,6 +75,8 @@ test("processing, storage loss, billing, reports and audit use guided workspaces
   assert.match(finance, /Unbilled Services/);
   assert.match(finance, /serviceEvents/);
   assert.match(finance, /daysOverdue/);
+  assert.match(finance, /Current outstanding always shows the complete account balance/);
+  assert.match(finance, /Show changes only/);
   assert.match(management, /loadReportTable/);
   assert.match(management, /Export CSV/);
   assert.match(management, /Search reference, user, action/);

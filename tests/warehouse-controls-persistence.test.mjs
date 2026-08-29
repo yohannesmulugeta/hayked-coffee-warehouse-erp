@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import { evaluateStorageLoss, bagPrintingQuote, generatorActualCost } from "../app/warehouse-control-rules.ts";
-import { calculateStorage, storageRate } from "../app/finance-rules.ts";
 
 test("warehouse controls migration enforces RLS, maker-checker, and stock movement integrity", () => {
   const migration = readdirSync("supabase/migrations").find((name) => name.endsWith("_warehouse_controls_and_billing.sql"));
@@ -57,24 +56,19 @@ test("storage loss and bag control rule mechanics operate as expected", () => {
   assert.equal(genCost, 6500);
 });
 
-test("storage rate and billing calculation engine functions correctly", () => {
-  assert.equal(storageRate("NO_PROCESSING", 30), 5);
-  assert.equal(storageRate("NO_PROCESSING", 95), 7);
-  assert.equal(storageRate("WAITING_PROCESSING", 15), 0);
-  assert.equal(storageRate("WAITING_PROCESSING", 30), 2.75);
+test("storage billing is tariff-authoritative and preserves daily calculation rows", () => {
+  const migration = readdirSync("supabase/migrations").find((name) => name.endsWith("_client_billing_rate_authority.sql"));
+  assert.ok(migration);
+  const sql = readFileSync(`supabase/migrations/${migration}`, "utf8");
+  const finance = readFileSync("app/finance-operations.tsx", "utf8");
 
-  const billing = calculateStorage({
-    client: "CL-001",
-    lot: "LOT-001",
-    category: "NO_PROCESSING",
-    receivedDate: "2026-01-01",
-    periodStart: "2026-01-01",
-    periodEnd: "2026-01-05",
-    tariffVersion: "TARIFF-2026-V1",
-    movements: [{ date: "2026-01-01", bagsDelta: 100, reference: "GRN-001" }]
-  });
-
-  assert.ok(billing.amount > 0);
-  assert.ok(billing.billableBagDays > 0);
-  assert.match(billing.duplicateKey, /CL-001\|LOT-001\|NO_PROCESSING\|2026-01-01\|2026-01-05\|TARIFF-2026-V1/);
+  assert.match(sql, /create table if not exists public\.storage_billing_run_days/i);
+  assert.match(sql, /function private\.storage_billing_daily_rows/i);
+  assert.match(sql, /function public\.quote_storage_billing/i);
+  assert.match(sql, /function public\.calculate_and_save_storage_billing_v2/i);
+  assert.match(sql, /revoke execute on function public\.calculate_and_save_storage_billing/i);
+  assert.match(sql, /function public\.create_client_setup/i);
+  assert.match(finance, /Show every day/);
+  assert.match(finance, /The database—not the browser—selects the rate/);
+  assert.doesNotMatch(finance, /2\.75/);
 });

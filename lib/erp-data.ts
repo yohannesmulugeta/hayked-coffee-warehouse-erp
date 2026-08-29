@@ -11,6 +11,7 @@ export function friendlyDatabaseError(error: DbError, fallback = "The record cou
   if (error.code === "PGRST116" || error.message.includes("Cannot coerce")) return "The selected record was not found. Refresh the page and select it again.";
   if (error.code === "42501" || /permission|policy|row-level security/i.test(error.message)) return "Your account does not have permission to perform this action.";
   if (/JWT|API key|not signed in/i.test(error.message)) return "Your session is not valid. Sign in again.";
+  if (/already exists|valid .*date range|cannot start before|does not belong|no independently verified tariff|has no rate|no billable storage charge/i.test(error.message)) return error.message;
   return fallback;
 }
 
@@ -257,6 +258,20 @@ export async function loadCoreData(): Promise<CoreData> {
 export type NewClient = { code: string; legalName: string; tin: string; phone: string; email: string };
 export type NewAgreement = { clientId: string; agreementNumber: string; effectiveFrom: string; effectiveTo: string | null; status: "DRAFT" | "ACTIVE"; defaultBagWeightKg: number; tariffVersion: string };
 export type NewRepresentative = { clientId: string; fullName: string; identityNumber: string; phone: string; validFrom: string; validTo: string | null; active: boolean };
+
+export async function createClientSetup(input: {
+  client: NewClient;
+  agreement?: Omit<NewAgreement, "clientId">;
+  representatives: Omit<NewRepresentative, "clientId">[];
+}) {
+  const { data, error } = await createSupabaseClient().rpc("create_client_setup", {
+    p_client: input.client,
+    p_agreement: input.agreement ?? null,
+    p_representatives: input.representatives,
+  });
+  if (error) throw new Error(friendlyDatabaseError(error, "The client setup could not be saved."));
+  return data as { clientId: string; agreementId: string | null; representativeCount: number };
+}
 
 export async function createClient(client: NewClient) {
   const db = createSupabaseClient();
@@ -530,6 +545,9 @@ export async function decideCreditOverride(id: string, decision: "APPROVED" | "R
 export type InvoiceRow = { id: string; invoice_number: string; client_id: string; tariff_version: string; subtotal_etb: number; tax_etb: number; total_etb: number; status: string; issued_on: string | null; due_on: string | null; line_snapshot: { description: string; quantity: number; rate_etb: number }[] };
 export type PaymentRow = { id: string; payment_number: string; invoice_id: string; client_id: string; amount_etb: number; bank_reference: string; paid_at: string; direction: string };
 export type ServiceEventRow = { id: string; client_id: string; service_type: string; description: string; quantity: number; unit_price: number; total_amount: number; reference_id: string; invoice_id: string | null; status: string; created_at: string };
+export type TariffLineItemRow = { id: string; tariff_version_id: string; category: string; age_start_days: number; age_end_days: number | null; daily_rate_per_unit: number; certified: boolean };
+export type StorageQuoteRow = { date: string; openingBags: number; movementBags: number; closingBags: number; ageDay: number; rate: number; units: number; amount: number; references: string[] };
+export type StorageQuote = { tariffVersion: string; duplicateKey: string; billableBagDays: number; amount: number; rows: StorageQuoteRow[] };
 export type FinanceData = {
   invoices: InvoiceRow[];
   payments: PaymentRow[];
@@ -537,13 +555,14 @@ export type FinanceData = {
   lots: (LotRow & { received_at: string })[];
   movements: { lot_id: string; bag_delta: number; occurred_at: string; reference_type: string }[];
   tariffs: { id: string; version_code: string; description: string | null; effective_from: string; effective_to: string | null; active: boolean; verified_by_1: string | null; verified_by_2: string | null }[];
+  tariffLineItems: TariffLineItemRow[];
   storageRuns: { id: string; duplicate_key: string; client_id: string; lot_id: string; run_number: string; total_amount: number; status: string }[];
   serviceEvents: ServiceEventRow[];
 };
 
 export async function loadFinanceData(): Promise<FinanceData> {
   const db = createSupabaseClient();
-  const [invoiceResult, paymentResult, clientResult, lotResult, receiptResult, movementResult, tariffResult, storageRunResult, serviceEventResult] = await Promise.all([
+  const [invoiceResult, paymentResult, clientResult, lotResult, receiptResult, movementResult, tariffResult, tariffLineResult, storageRunResult, serviceEventResult] = await Promise.all([
     db.from("invoices").select("id,invoice_number,client_id,tariff_version,subtotal_etb,tax_etb,total_etb,status,issued_on,due_on,line_snapshot").order("created_at", { ascending: false }),
     db.from("payments").select("id,payment_number,invoice_id,client_id,amount_etb,bank_reference,paid_at,direction").order("paid_at", { ascending: false }),
     db.from("clients").select("id,code,legal_name,tin,active").order("legal_name"),
@@ -551,6 +570,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
     db.from("warehouse_receipts").select("id,arrival_at"),
     db.from("stock_movements").select("lot_id,bag_delta,occurred_at,reference_type").order("occurred_at"),
     db.from("tariff_versions").select("id,version_code,description,effective_from,effective_to,active,verified_by_1,verified_by_2").order("effective_from", { ascending: false }),
+    db.from("tariff_line_items").select("id,tariff_version_id,category,age_start_days,age_end_days,daily_rate_per_unit,certified").order("category").order("age_start_days"),
     db.from("storage_billing_runs").select("id,duplicate_key,client_id,lot_id,run_number,total_amount,status").order("created_at", { ascending: false }),
     db.from("service_events").select("id,client_id,service_type,description,quantity,unit_price,total_amount,reference_id,invoice_id,status,created_at").order("created_at", { ascending: false }),
   ]);
@@ -562,6 +582,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
     lots: result(lotResult.data as LotRow[] | null, lotResult.error).map((lot) => ({ ...lot, received_at: receiptDates.get(lot.receipt_id ?? "") ?? new Date().toISOString() })),
     movements: result(movementResult.data as FinanceData["movements"] | null, movementResult.error),
     tariffs: result(tariffResult.data as FinanceData["tariffs"] | null, tariffResult.error),
+    tariffLineItems: result(tariffLineResult.data as TariffLineItemRow[] | null, tariffLineResult.error),
     storageRuns: result(storageRunResult.data as FinanceData["storageRuns"] | null, storageRunResult.error),
     serviceEvents: result(serviceEventResult.data as ServiceEventRow[] | null, serviceEventResult.error),
   };
@@ -1001,6 +1022,28 @@ export async function postGeneratorRequest(input: {
   return data as string;
 }
 
+export async function quoteStorageBilling(input: {
+  clientId: string;
+  lotId: string;
+  category: string;
+  periodStart: string;
+  periodEnd: string;
+  tariffVersion: string;
+  certified: boolean;
+}) {
+  const { data, error } = await createSupabaseClient().rpc("quote_storage_billing", {
+    p_client_id: input.clientId,
+    p_lot_id: input.lotId,
+    p_category: input.category,
+    p_period_start: input.periodStart,
+    p_period_end: input.periodEnd,
+    p_tariff_version: input.tariffVersion,
+    p_certified: input.certified,
+  });
+  if (error) throw new Error(friendlyDatabaseError(error, "The storage quote could not be calculated."));
+  return data as StorageQuote;
+}
+
 export async function runStorageBilling(input: {
   clientId: string;
   lotId: string;
@@ -1008,18 +1051,16 @@ export async function runStorageBilling(input: {
   periodStart: string;
   periodEnd: string;
   tariffVersion: string;
-  billableBagDays: number;
-  totalAmount: number;
+  certified: boolean;
 }) {
-  const { data, error } = await createSupabaseClient().rpc("calculate_and_save_storage_billing", {
+  const { data, error } = await createSupabaseClient().rpc("calculate_and_save_storage_billing_v2", {
     p_client_id: input.clientId,
     p_lot_id: input.lotId,
     p_category: input.category,
     p_period_start: input.periodStart,
     p_period_end: input.periodEnd,
     p_tariff_version: input.tariffVersion,
-    p_billable_bag_days: input.billableBagDays,
-    p_total_amount: input.totalAmount,
+    p_certified: input.certified,
   });
   if (error) throw new Error(friendlyDatabaseError(error, "Failed to run storage billing."));
   return data as string;
