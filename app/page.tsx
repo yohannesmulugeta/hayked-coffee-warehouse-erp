@@ -258,7 +258,7 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
 
         {activeView === "Dashboard" ? <div className="dashboard">
           <section className="welcome-row">
-            <div><span className="demo-label">{supabaseConfigured ? "LIVE LOCAL DATABASE" : "LOCAL SAMPLE WORKSPACE"}</span><h1>Good morning, {firstName}.</h1><p>Here is the warehouse position and today&apos;s operational attention list.</p></div>
+            <div><span className="demo-label">{supabaseConfigured ? "LIVE DATABASE" : "LOCAL SAMPLE WORKSPACE"}</span><h1>Good morning, {firstName}.</h1><p>Here is the warehouse position and today&apos;s operational attention list.</p></div>
             <div className="page-actions"><button className="secondary-button" type="button" onClick={() => window.print()}><Printer size={17} />Print overview</button><button className="primary-button" type="button" onClick={() => navigate({ view: "Warehouse Receipts" })}><Plus size={17} />Receive coffee</button></div>
           </section>
 
