@@ -35,11 +35,11 @@ import { DispatchOperations, dispatchViews } from "./dispatch-operations";
 import { FinanceOperations, financeViews } from "./finance-operations";
 import { ManagementOperations, managementViews } from "./management-operations";
 import { createSupabaseClient, supabaseConfigured } from "@/lib/supabase/client";
-import { loadDashboardData, type DashboardData } from "@/lib/erp-data";
+import { loadDashboardData, type DashboardData, type ReportType } from "@/lib/erp-data";
 import { notificationTarget, type ProcessingStateFilter, type StockStatusFilter, type StockTypeFilter } from "./ux-rules";
 
 type NavItem = { view: string; label: string; icon: LucideIcon; badge?: number };
-type NavigationIntent = { view: string; stockType?: StockTypeFilter; stockStatus?: StockStatusFilter; processingState?: ProcessingStateFilter; focusId?: string };
+type NavigationIntent = { view: string; stockType?: StockTypeFilter; stockStatus?: StockStatusFilter; processingState?: ProcessingStateFilter; reportType?: ReportType; focusId?: string };
 
 const operations: NavItem[] = [
   { view: "Clients", label: "Clients", icon: UsersRound },
@@ -200,6 +200,7 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [stockIntent, setStockIntent] = useState<{ type: StockTypeFilter; status: StockStatusFilter; focusId?: string }>({ type: "All", status: "All" });
   const [processingState, setProcessingState] = useState<ProcessingStateFilter>("All");
+  const [reportType, setReportType] = useState<ReportType>("Stock");
   useEffect(() => { void loadDashboardData().then(setDashboardData).catch(() => setDashboardData(null)); }, []);
   const filteredActivities = useMemo(() => (dashboardData?.activities ?? (supabaseConfigured ? [] : activities)).filter((row) => row.join(" ").toLowerCase().includes(query.toLowerCase())), [dashboardData?.activities, query]);
   const visibleMetrics = dashboardData?.metrics.map((item, index) => ({ ...item, value: item.value.toLocaleString(), tone: metrics[index].tone, icon: metrics[index].icon })) ?? metrics;
@@ -221,6 +222,7 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
   function navigate(intent: NavigationIntent) {
     if (intent.stockType || intent.stockStatus || intent.focusId) setStockIntent({ type: intent.stockType ?? "All", status: intent.stockStatus ?? "All", focusId: intent.focusId });
     if (intent.processingState) setProcessingState(intent.processingState);
+    if (intent.reportType) setReportType(intent.reportType);
     setActiveView(intent.view);
     setNotificationOpen(false);
     setQuery("");
@@ -247,7 +249,7 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
         <header className="topbar">
           <div className="crumb"><button type="button" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}><Menu size={20} /><span>Menu</span></button><span>Workspace</span><ChevronRight size={13} /><strong>{viewLabels.get(activeView) ?? activeView}</strong></div>
           <div className="top-actions">
-            <div className="global-search-wrap"><label className="global-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search GRN, lot, client, order, dispatch or invoice" aria-label="Search warehouse records" /></label>{query.trim().length >= 2 && <div className="global-search-results" role="listbox" aria-label="Search results">{searchResults.length ? searchResults.map((item) => <button key={`${item.kind}-${item.id}`} type="button" onClick={() => navigate({ view: item.view, focusId: item.id })}><span>{item.kind}</span><strong>{item.title}</strong><small>{item.context}</small></button>) : <p>No matching warehouse records.</p>}</div>}</div>
+            <div className="global-search-wrap"><label className="global-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search any client, coffee, payment or document" aria-label="Search warehouse records" /></label>{query.trim().length >= 2 && <div className="global-search-results" role="listbox" aria-label="Search results">{searchResults.length ? searchResults.map((item) => <button key={`${item.kind}-${item.id}`} type="button" onClick={() => navigate({ view: item.view, focusId: item.id })}><span>{item.kind}</span><strong>{item.title}</strong><small>{item.context}</small></button>) : <p>No matching warehouse records.</p>}</div>}</div>
             <button className="icon-button" type="button" aria-label="Approvals" onClick={() => navigate({ view: "Approvals" })}><ClipboardCheck size={18} />{Boolean(dashboardData?.pendingApprovals) && <b>{dashboardData?.pendingApprovals}</b>}</button>
             <div className="notification-wrap"><button className="icon-button" type="button" aria-label="Notifications" aria-expanded={notificationOpen} onClick={() => setNotificationOpen((value) => !value)}><Bell size={18} />{notificationCount > 0 && <b>{notificationCount}</b>}</button>{notificationOpen && <div className="notification-popover" role="dialog" aria-label="Items needing attention"><header><div><strong>Needs attention</strong><small>{notificationCount ? `${notificationCount} actionable item${notificationCount === 1 ? "" : "s"}` : "Warehouse queue is clear"}</small></div><button type="button" aria-label="Close notifications" onClick={() => setNotificationOpen(false)}><X size={16} /></button></header>{actionableAttention.length ? actionableAttention.map((item) => <button type="button" key={item.label} onClick={() => navigate(notificationTarget(item.label))}><b className={item.tone}>{item.count}</b><span><strong>{item.label}</strong><small>{item.note}</small></span><ChevronRight size={15} /></button>) : <p>No items need your attention.</p>}</div>}</div>
             <button className="profile" type="button" onClick={onSignOut}><span>{initials}</span><span><strong>{profile.full_name}</strong><small>{profile.role.replaceAll("_", " ")}</small></span></button>
@@ -296,7 +298,7 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
               {filteredActivities.length ? filteredActivities.map((row, rowIndex) => <div role="row" key={`${row[0]}-${rowIndex}`}>{row.map((cell, index) => <span role="cell" key={`${cell}-${index}`} className={index === 0 ? "reference" : ""}>{cell}</span>)}</div>) : <p className="empty-result">No activity matches &quot;{query}&quot;.</p>}
             </div>
           </section>
-        </div> : activeView === "Processing" ? <ProcessingOperations initialState={processingState} /> : warehouseControlViews.includes(activeView) ? <WarehouseControls activeView={activeView} onNavigate={navigate} /> : dispatchViews.includes(activeView) ? <DispatchOperations activeView={activeView} /> : financeViews.includes(activeView) ? <FinanceOperations /> : managementViews.includes(activeView) ? <ManagementOperations activeView={activeView} onNavigate={navigate} /> : <CoreOperations activeView={activeView} stockIntent={stockIntent} />}
+        </div> : activeView === "Processing" ? <ProcessingOperations initialState={processingState} /> : warehouseControlViews.includes(activeView) ? <WarehouseControls activeView={activeView} onNavigate={navigate} /> : dispatchViews.includes(activeView) ? <DispatchOperations activeView={activeView} onNavigate={navigate} /> : financeViews.includes(activeView) ? <FinanceOperations /> : managementViews.includes(activeView) ? <ManagementOperations activeView={activeView} onNavigate={navigate} initialReportType={reportType} /> : <CoreOperations activeView={activeView} stockIntent={stockIntent} />}
       </section>
     </main>
   );

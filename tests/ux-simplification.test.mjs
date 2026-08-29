@@ -82,3 +82,30 @@ test("processing, storage loss, billing, reports and audit use guided workspaces
   assert.match(management, /Search reference, user, action/);
   assert.doesNotMatch(management, /<span>Event ID<\/span>/);
 });
+
+test("daily work has direct, plain-language actions and complete finance evidence", async () => {
+  const [page, clients, processing, dispatch, finance] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/core-operations.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/processing-operations.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/dispatch-operations.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/finance-operations.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /reportType/);
+  assert.match(page, /onNavigate=\{navigate\}/);
+  assert.match(page, /Search any client, coffee, payment or document/);
+  assert.match(clients, /Edit client/);
+  assert.match(clients, /updateClientProfile/);
+  assert.match(clients, /This agreement tells the ERP/);
+  assert.match(processing, /Save first, then attach the request file/);
+  assert.match(processing, /ECX check required/);
+  assert.match(dispatch, /Open dispatch report/);
+  assert.match(dispatch, /Fix missing document information/);
+  assert.match(dispatch, /Post transfer departure/);
+  assert.doesNotMatch(dispatch, /const \[ecs, setEcs\]/);
+  assert.match(finance, /Transaction \/ receipt reference/);
+  assert.match(finance, /Payer name/);
+  assert.match(finance, /Full client account/);
+  assert.match(finance, /database rate record/i);
+});

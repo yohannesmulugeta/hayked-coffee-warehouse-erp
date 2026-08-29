@@ -28,7 +28,7 @@ function downloadReport(title: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
-export function ManagementOperations({ activeView, onNavigate }: { activeView: string; onNavigate?: (intent: { view: string; focusId?: string }) => void }) {
+export function ManagementOperations({ activeView, onNavigate, initialReportType = "Stock" }: { activeView: string; onNavigate?: (intent: { view: string; focusId?: string }) => void; initialReportType?: ReportType }) {
   const [scopedMessage, setScopedMessage] = useState({ view: "", text: "" });
   const message = scopedMessage.view === activeView ? scopedMessage.text : "";
   const setMessage = (text: string) => setScopedMessage({ view: activeView, text });
@@ -52,7 +52,7 @@ export function ManagementOperations({ activeView, onNavigate }: { activeView: s
   const [profiles, setProfiles] = useState<{ id: string; email?: string; full_name: string; role: string; active: boolean; last_sign_in_at?: string | null }[]>([]);
   const [businessReferences, setBusinessReferences] = useState<BusinessReference[]>([]);
   const [reportClients, setReportClients] = useState<{ id: string; legal_name: string }[]>([]);
-  const [reportType, setReportType] = useState<ReportType>("Stock");
+  const [reportType, setReportType] = useState<ReportType>(initialReportType);
   const [reportFrom, setReportFrom] = useState("");
   const [reportTo, setReportTo] = useState("");
   const [reportClientId, setReportClientId] = useState("");

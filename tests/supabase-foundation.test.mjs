@@ -192,3 +192,20 @@ test("processing traceability refinement shares reservations, preserves lineage,
   assert.match(sql, /insert into public\.processing_output_sources/i);
   assert.doesNotMatch(sql, /service_role/i);
 });
+
+test("simplified workflows keep client edits, payment details, readiness fixes and ECX approval authoritative", () => {
+  const migration = readdirSync("supabase/migrations").find((name) => name.endsWith("_simplify_erp_workflows.sql"));
+  assert.ok(migration);
+  const sql = readFileSync(`supabase/migrations/${migration}`, "utf8");
+
+  for (const rpc of ["update_client_profile", "update_dispatch_readiness", "record_invoice_payment_v2", "transition_processing_request"]) {
+    assert.match(sql, new RegExp(`function public\\.${rpc}`, "i"));
+  }
+  assert.match(sql, /payment_method text not null default 'BANK_TRANSFER'/i);
+  assert.match(sql, /target_status = 'APPROVED' and not exists[\s\S]*check_record\.result in \('PASSED', 'NOT_REQUIRED'\)/i);
+  assert.match(sql, /payment reference has already been recorded/i);
+  assert.match(sql, /Payment exceeds the outstanding invoice balance/i);
+  assert.match(sql, /revoke all on function public\.update_client_profile/i);
+  assert.match(sql, /grant execute on function public\.record_invoice_payment_v2/i);
+  assert.doesNotMatch(sql, /service_role/i);
+});
