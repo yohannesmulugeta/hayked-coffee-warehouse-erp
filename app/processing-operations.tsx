@@ -1512,7 +1512,7 @@ export function ProcessingOperations({
                           onClick={() => setEcxRequestId(item.requestId)}
                         >
                           <FileCheck2 size={13} />
-                          Details & files
+                          Request & ECX
                         </button>
                       )}
                       {item.request?.status === "DRAFT" && (
@@ -1568,7 +1568,7 @@ export function ProcessingOperations({
                               setDetailOrderId(item.queueItem!.databaseId)
                             }
                           >
-                            Details & files
+                            Order & files
                           </button>
                           <button
                             className="table-action"
@@ -1592,7 +1592,7 @@ export function ProcessingOperations({
                               setDetailOrderId(item.order!.databaseId)
                             }
                           >
-                            Details & files
+                            Order & files
                           </button>
                           {item.order.status === "IN_PROCESS" ? (
                             <button
@@ -1865,7 +1865,7 @@ export function ProcessingOperations({
                   <FileCheck2 size={17} />
                   <span>
                     <strong>Save first, then attach the request file.</strong>{" "}
-                    Use “Details & files” on the saved request to upload its signed PDF, scan, or photo. ECX checking is recorded in the same detail view but remains a separate control.
+                    Use “Request & ECX” on the saved request to upload its signed PDF, scan, or photo. ECX checking is recorded in the same detail view but remains a separate control.
                   </span>
                 </div>
               </div>

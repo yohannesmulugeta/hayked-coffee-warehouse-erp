@@ -28,3 +28,28 @@ export function calculateLabourCharge(internalCostEtb: number, fixedAdditionEtb:
     clientChargeEtb: Math.round((internalCostEtb + fixedAdditionEtb) * 100) / 100,
   };
 }
+
+export type ServiceHistoryFilter = {
+  query: string;
+  type: string;
+  from: string;
+  to: string;
+};
+
+export function filterServiceHistory<
+  T extends { type: string; date: string; searchText: string },
+>(rows: T[], filters: ServiceHistoryFilter) {
+  const query = filters.query.trim().toLowerCase();
+  return rows.filter(
+    (row) =>
+      (filters.type === "ALL" || row.type === filters.type) &&
+      (!filters.from || row.date >= filters.from) &&
+      (!filters.to || row.date <= filters.to) &&
+      (!query || row.searchText.toLowerCase().includes(query)),
+  );
+}
+
+export function paginateServiceHistory<T>(rows: T[], page: number, pageSize = 10) {
+  const safePage = Math.max(1, Math.floor(page));
+  return rows.slice((safePage - 1) * pageSize, safePage * pageSize);
+}

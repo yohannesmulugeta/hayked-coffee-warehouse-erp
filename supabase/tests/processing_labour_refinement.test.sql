@@ -1,5 +1,5 @@
 begin;
-select plan(48);
+select plan(51);
 
 set local role authenticated;
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000004';
@@ -39,6 +39,10 @@ $sql$, 'A same-client Arrival plus Reject plus Processed request is created');
 select is((select count(*)::integer from public.processing_request_lines where request_id = current_setting('test.request_id')::uuid), 3, 'The request stores three unique input lines');
 select is((select count(distinct lot.client_id)::integer from public.processing_request_lines line join public.coffee_lots lot on lot.id = line.lot_id where line.request_id = current_setting('test.request_id')::uuid), 1, 'All request inputs belong to one client');
 select lives_ok($sql$select public.transition_processing_request(current_setting('test.request_id')::uuid, 'SUBMITTED')$sql$, 'Multi-source request submits');
+select lives_ok(
+  $sql$select public.create_ecx_check(current_setting('test.request_id')::uuid, current_date, 'NOT_REQUIRED', null, 'Test inspector', 'Integration test exemption')$sql$,
+  'Multi-source request records an ECX decision before approval'
+);
 
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000002';
 select lives_ok($sql$select public.transition_processing_request(current_setting('test.request_id')::uuid, 'APPROVED')$sql$, 'Independent manager approves the request');
@@ -100,6 +104,10 @@ select lives_ok($sql$
 $sql$, 'A second order can combine prior Processed and Reject output lots');
 select is((select count(*)::integer from public.processing_request_lines where request_id = current_setting('test.request2_id')::uuid), 2, 'Second request retains both repeated-processing sources');
 select lives_ok($sql$select public.transition_processing_request(current_setting('test.request2_id')::uuid, 'SUBMITTED')$sql$, 'Second request submits');
+select lives_ok(
+  $sql$select public.create_ecx_check(current_setting('test.request2_id')::uuid, current_date, 'NOT_REQUIRED', null, 'Test inspector', 'Integration test exemption')$sql$,
+  'Second request records an ECX decision before approval'
+);
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000002';
 select lives_ok($sql$select public.transition_processing_request(current_setting('test.request2_id')::uuid, 'APPROVED')$sql$, 'Second request is independently approved');
 select lives_ok($sql$select set_config('test.order2_id', (public.queue_processing_request(current_setting('test.request2_id')::uuid) ->> 'id'), true)$sql$, 'Second request reserves both output lots');
@@ -126,6 +134,10 @@ select lives_ok($sql$
   )
 $sql$, 'A two-lot request is created for the atomic rollback proof');
 select lives_ok($sql$select public.transition_processing_request(current_setting('test.rollback_request_id')::uuid, 'SUBMITTED')$sql$, 'Rollback-proof request submits');
+select lives_ok(
+  $sql$select public.create_ecx_check(current_setting('test.rollback_request_id')::uuid, current_date, 'NOT_REQUIRED', null, 'Test inspector', 'Integration test exemption')$sql$,
+  'Rollback-proof request records an ECX decision before approval'
+);
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000002';
 select lives_ok($sql$select public.transition_processing_request(current_setting('test.rollback_request_id')::uuid, 'APPROVED')$sql$, 'Rollback-proof request is approved');
 select lives_ok($sql$select set_config('test.rollback_order_id', (public.queue_processing_request(current_setting('test.rollback_request_id')::uuid) ->> 'id'), true)$sql$, 'Rollback-proof order reserves both lots');

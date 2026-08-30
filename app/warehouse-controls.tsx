@@ -8,8 +8,10 @@ import {
   Check,
   Droplets,
   Fuel,
+  History,
   Plus,
   Printer,
+  Search,
   ShieldCheck,
   UsersRound,
 } from "lucide-react";
@@ -18,7 +20,9 @@ import {
   bagPrintingQuote,
   calculateLabourCharge,
   evaluateStorageLoss,
+  filterServiceHistory,
   generatorActualCost,
+  paginateServiceHistory,
 } from "./warehouse-control-rules";
 import {
   loadWarehouseControlData,
@@ -38,6 +42,22 @@ export const warehouseControlViews = [
   "Labour",
   "Generator Requests",
 ];
+
+type ServiceWorkspaceTab = "LABOUR" | "SERVICES" | "RENT" | "HISTORY";
+type ServiceHistoryRow = {
+  id: string;
+  type: Exclude<ServiceWorkspaceTab, "HISTORY">;
+  date: string;
+  reference: string;
+  client: string;
+  summary: string;
+  internalAmount: number | null;
+  clientAmount: number | null;
+  status: string;
+  searchText: string;
+};
+
+const serviceHistoryPageSize = 10;
 
 function Status({ value }: { value: string }) {
   return (
@@ -127,6 +147,7 @@ export function WarehouseControls({
   const [manualServiceDate, setManualServiceDate] = useState(new Date().toISOString().slice(0, 10));
   const [manualDescription, setManualDescription] = useState("");
   const [manualQuantity, setManualQuantity] = useState(1);
+  const [manualRateId, setManualRateId] = useState("");
   const [manualUnit, setManualUnit] = useState("kg");
   const [manualUnitPrice, setManualUnitPrice] = useState(0);
   const [manualApproverId, setManualApproverId] = useState("");
@@ -134,7 +155,13 @@ export function WarehouseControls({
   const [manualNote, setManualNote] = useState("");
   const [manualBusy, setManualBusy] = useState(false);
 
-  const [showRentRecording, setShowRentRecording] = useState(false);
+  const [activeServiceTab, setActiveServiceTab] =
+    useState<ServiceWorkspaceTab>("LABOUR");
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historyType, setHistoryType] = useState("ALL");
+  const [historyFrom, setHistoryFrom] = useState("");
+  const [historyTo, setHistoryTo] = useState("");
+  const [historyPage, setHistoryPage] = useState(1);
   const [rentClientId, setRentClientId] = useState("");
   const [rentLotId, setRentLotId] = useState("");
   const [rentCategory, setRentCategory] = useState("WAITING_PROCESSING");
@@ -191,6 +218,8 @@ export function WarehouseControls({
     ) ?? [];
   const manualOrders = data?.processingOrders.filter((item) => item.client_id === manualClientId && item.status === "POSTED") ?? [];
   const manualNeedsProcessingOrder = ["PROCESSING", "HULLING", "CLEANING"].includes(manualServiceCode);
+  const manualRates = data?.serviceRates.filter((item) => item.service_code === manualServiceCode && item.effective_from <= manualServiceDate && (!item.effective_to || item.effective_to >= manualServiceDate)) ?? [];
+  const selectedManualRate = manualRates.find((item) => item.id === manualRateId);
   const activeRentLotIds = new Set((data?.storageRentRecords ?? []).filter((item) => item.status === "ACTIVE").map((item) => item.lot_id));
   const rentLots = data?.lots.filter((item) => item.client_id === rentClientId && Number(item.quantity_kg) > 0 && !activeRentLotIds.has(item.id)) ?? [];
   const lossLots =
@@ -247,6 +276,70 @@ export function WarehouseControls({
       (item) =>
         item.client_id === labourClientId && Number(item.quantity_kg) > 0,
     ) ?? [];
+  const serviceHistoryRows: ServiceHistoryRow[] = [
+    ...(data?.labourRecords ?? []).map((entry) => {
+      const client = clientById.get(entry.client_id) ?? "Unknown client";
+      return {
+        id: `labour-${entry.id}`,
+        type: "LABOUR" as const,
+        date: entry.work_date,
+        reference: entry.labour_number,
+        client,
+        summary: entry.activity,
+        internalAmount: Number(entry.internal_cost_etb),
+        clientAmount: Number(entry.client_charge_etb),
+        status: entry.service_event_id ? "UNBILLED" : "INCOMPLETE",
+        searchText: `${entry.labour_number} ${entry.activity} ${client}`,
+      };
+    }),
+    ...(data?.manualServices ?? []).map((service) => {
+      const client = clientById.get(service.client_id) ?? "Unknown client";
+      return {
+        id: `service-${service.id}`,
+        type: "SERVICES" as const,
+        date: service.service_date,
+        reference: service.service_number,
+        client,
+        summary: service.description,
+        internalAmount: null,
+        clientAmount: Number(service.total_amount),
+        status: "UNBILLED",
+        searchText: `${service.service_number} ${service.description} ${service.service_code} ${client}`,
+      };
+    }),
+    ...(data?.storageRentRecords ?? []).map((record) => {
+      const client = clientById.get(record.client_id) ?? "Unknown client";
+      const lot = data?.lots.find((item) => item.id === record.lot_id)?.lot_number ?? "Unknown lot";
+      const summary = `${lot} · ${record.storage_category.replaceAll("_", " ")}`;
+      return {
+        id: `rent-${record.id}`,
+        type: "RENT" as const,
+        date: record.created_at.slice(0, 10),
+        reference: record.rent_number,
+        client,
+        summary,
+        internalAmount: null,
+        clientAmount: null,
+        status: record.status,
+        searchText: `${record.rent_number} ${client} ${summary}`,
+      };
+    }),
+  ].sort((left, right) => right.date.localeCompare(left.date) || right.reference.localeCompare(left.reference));
+  const filteredServiceHistory = filterServiceHistory(serviceHistoryRows, {
+    query: historyQuery,
+    type: historyType,
+    from: historyFrom,
+    to: historyTo,
+  });
+  const serviceHistoryPageCount = Math.max(
+    1,
+    Math.ceil(filteredServiceHistory.length / serviceHistoryPageSize),
+  );
+  const visibleServiceHistory = paginateServiceHistory(
+    filteredServiceHistory,
+    Math.min(historyPage, serviceHistoryPageCount),
+    serviceHistoryPageSize,
+  );
 
   async function recordLoss(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -374,8 +467,8 @@ export function WarehouseControls({
 
   async function addManualService(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!manualClientId || !manualApproverId || (manualNeedsProcessingOrder && !manualOrderId)) {
-      setMessage("Select the client, completed processing order, and independent approver.");
+    if (!manualClientId || !manualApproverId || !selectedManualRate || (manualNeedsProcessingOrder && !manualOrderId)) {
+      setMessage("Select the client, an approved catalog rate, completed processing order when required, and independent approver.");
       return;
     }
     setManualBusy(true);
@@ -386,8 +479,8 @@ export function WarehouseControls({
         serviceDate: manualServiceDate,
         description: manualDescription,
         quantity: manualQuantity,
-        unitLabel: manualUnit,
-        unitPrice: manualUnitPrice,
+        unitLabel: selectedManualRate.unit_label,
+        unitPrice: Number(selectedManualRate.unit_price),
         approvedBy: manualApproverId,
         processingOrderId: manualOrderId || null,
         evidenceReference: manualEvidenceReference,
@@ -988,16 +1081,18 @@ export function WarehouseControls({
       <div className="module-page">
         <Header
           label="COST CONTROL"
-          title="Labour entries"
-          copy="Record the work once. The ERP keeps Hayked's cost separate from the amount that will later appear in client billing."
+          title="Labour & Services"
+          copy="Choose one task, record it, then use History to search previous work."
+          onReports={() => onNavigate?.({ view: "Reports" })}
         />
         {notice}
-        <section className="service-workspace-overview">
-          <article><UsersRound size={18} /><div><strong>Labour</strong><p>Records Hayked&apos;s internal cost and a separate client charge for finance review.</p></div></article>
-          <article><Archive size={18} /><div><strong>Processing & other services</strong><p>Created only when staff deliberately record completed work below. Never automatic.</p></div></article>
-          <button type="button" onClick={() => setShowRentRecording((current) => !current)}><Banknote size={18} /><span><strong>Warehouse rent</strong><small>Record the client and lot now. Finance calculates verified daily rent later.</small></span></button>
+        <section className="service-workspace-tabs" role="tablist" aria-label="Labour and service workspaces">
+          <button role="tab" aria-selected={activeServiceTab === "LABOUR"} className={activeServiceTab === "LABOUR" ? "active" : ""} type="button" onClick={() => setActiveServiceTab("LABOUR")}><UsersRound size={18} /><span><strong>Labour</strong><small>Record Hayked cost and client charge</small></span></button>
+          <button role="tab" aria-selected={activeServiceTab === "SERVICES"} className={activeServiceTab === "SERVICES" ? "active" : ""} type="button" onClick={() => setActiveServiceTab("SERVICES")}><Archive size={18} /><span><strong>Services</strong><small>Processing and other completed work</small></span></button>
+          <button role="tab" aria-selected={activeServiceTab === "RENT"} className={activeServiceTab === "RENT" ? "active" : ""} type="button" onClick={() => setActiveServiceTab("RENT")}><Banknote size={18} /><span><strong>Warehouse Rent</strong><small>Record first; finance calculates later</small></span></button>
+          <button role="tab" aria-selected={activeServiceTab === "HISTORY"} className={activeServiceTab === "HISTORY" ? "active" : ""} type="button" onClick={() => setActiveServiceTab("HISTORY")}><History size={18} /><span><strong>History</strong><small>Search all recorded work</small></span></button>
         </section>
-        {showRentRecording && (
+        {activeServiceTab === "RENT" && (
           <section className="service-recording-section">
             <div className="section-title-row"><div><h2>Record warehouse rent</h2><p className="form-note">This saves a billing instruction only. It does not create an amount, service charge, or invoice.</p></div><Status value="RECORD ONLY" /></div>
             <div className="control-layout">
@@ -1017,30 +1112,34 @@ export function WarehouseControls({
             </div>
           </section>
         )}
-        <section className="service-recording-section">
+        {activeServiceTab === "SERVICES" && (
+        <section className="service-recording-section focused-service-panel">
           <div className="section-title-row"><div><h2>Record processing or another service</h2><p className="form-note">Use this only after the work happened. Completing a processing order never charges the client by itself.</p></div><Status value="MANUAL ONLY" /></div>
-          <div className="control-layout">
+          <div className="service-focused-form">
             <form className="control-form" onSubmit={addManualService}>
-              <header><Archive size={19} /><div><h2>New manual service</h2><p>An independent approver confirms the quantity and rate before it becomes unbilled work.</p></div></header>
+              <header><Archive size={19} /><div><h2>New manual service</h2><p>The rate comes from the independently verified catalog. Staff record only the completed quantity and evidence.</p></div></header>
               <div className="control-fields">
-                <label>Service date<input type="date" required max={new Date().toISOString().slice(0, 10)} value={manualServiceDate} onChange={(event) => setManualServiceDate(event.target.value)} /></label>
+                <label>Service date<input type="date" required max={new Date().toISOString().slice(0, 10)} value={manualServiceDate} onChange={(event) => { setManualServiceDate(event.target.value); setManualRateId(""); }} /></label>
                 <label>Client<select required value={manualClientId} onChange={(event) => { setManualClientId(event.target.value); setManualOrderId(""); }}><option value="" disabled>Select client</option>{clients.map((item) => <option key={item.id} value={item.id}>{item.code} - {item.legal_name}</option>)}</select></label>
-                <label>Service type<select value={manualServiceCode} onChange={(event) => { setManualServiceCode(event.target.value); if (!["PROCESSING", "HULLING", "CLEANING"].includes(event.target.value)) setManualOrderId(""); }}><option value="PROCESSING">Processing</option><option value="HULLING">Hulling</option><option value="CLEANING">Cleaning</option><option value="TRANSPORT">Transport / handling</option><option value="OTHER">Other service</option></select></label>
+                <label>Service type<select value={manualServiceCode} onChange={(event) => { setManualServiceCode(event.target.value); setManualRateId(""); if (!["PROCESSING", "HULLING", "CLEANING"].includes(event.target.value)) setManualOrderId(""); }}><option value="PROCESSING">Processing</option><option value="HULLING">Hulling</option><option value="CLEANING">Cleaning</option><option value="TRANSPORT">Transport / handling</option><option value="OTHER">Other service</option></select></label>
                 <label>Completed processing order<select required={manualNeedsProcessingOrder} value={manualOrderId} disabled={!manualClientId || !manualNeedsProcessingOrder} onChange={(event) => setManualOrderId(event.target.value)}><option value="">{manualNeedsProcessingOrder ? "Select completed order" : "Not required"}</option>{manualOrders.map((item) => <option key={item.id} value={item.id}>{item.order_number}</option>)}</select></label>
                 <label className="wide">What work was completed?<input required minLength={3} maxLength={240} value={manualDescription} onChange={(event) => setManualDescription(event.target.value)} placeholder="Example: Hulling completed for client processing order" /></label>
                 <label>Quantity<input type="number" required min="0.001" step="0.001" value={manualQuantity} onChange={(event) => setManualQuantity(Number(event.target.value))} /></label>
-                <label>Unit<input required maxLength={30} value={manualUnit} onChange={(event) => setManualUnit(event.target.value)} placeholder="kg, bags, batch" /></label>
-                <label>Approved rate per unit (ETB)<input type="number" required min="0" step="0.01" value={manualUnitPrice} onChange={(event) => setManualUnitPrice(Number(event.target.value))} /></label>
+                <label>Approved catalog rate<select required value={manualRateId} onChange={(event) => { const rate = manualRates.find((item) => item.id === event.target.value); setManualRateId(event.target.value); setManualUnit(rate?.unit_label ?? ""); setManualUnitPrice(Number(rate?.unit_price ?? 0)); }}><option value="">{manualRates.length ? "Select verified rate" : "No verified rate configured"}</option>{manualRates.map((rate) => <option key={rate.id} value={rate.id}>{rate.description} · ETB {Number(rate.unit_price).toLocaleString()} / {rate.unit_label}</option>)}</select></label>
+                <label>Unit<input value={manualUnit} readOnly aria-readonly="true" placeholder="From approved rate" /></label>
+                <label>Approved rate per unit (ETB)<input type="number" value={manualUnitPrice} readOnly aria-readonly="true" /></label>
                 <label>Independent approver<select required value={manualApproverId} onChange={(event) => setManualApproverId(event.target.value)}><option value="" disabled>Select approver</option>{approvers.map((item) => <option key={item.id} value={item.id}>{item.full_name}</option>)}</select></label>
                 <label>Evidence reference<input value={manualEvidenceReference} onChange={(event) => setManualEvidenceReference(event.target.value)} placeholder="Job card, voucher, or worksheet" /></label>
                 <label className="wide">Note<textarea rows={2} value={manualNote} onChange={(event) => setManualNote(event.target.value)} /></label>
               </div>
               <div className="labour-charge-preview"><div><span>Quantity</span><strong>{manualQuantity.toLocaleString()} {manualUnit}</strong></div><span>×</span><div><span>Approved rate</span><strong>ETB {manualUnitPrice.toLocaleString()}</strong></div><span>=</span><div><span>Unbilled amount</span><strong>ETB {(manualQuantity * manualUnitPrice).toLocaleString()}</strong></div></div>
-              <button className="primary-button" type="submit" disabled={manualBusy || !manualClientId || !manualApproverId || (manualNeedsProcessingOrder && !manualOrderId)}><Plus size={16} />{manualBusy ? "Recording..." : "Record manual service"}</button>
+              <button className="primary-button" type="submit" disabled={manualBusy || !manualClientId || !manualApproverId || !selectedManualRate || (manualNeedsProcessingOrder && !manualOrderId)}><Plus size={16} />{manualBusy ? "Recording..." : "Record manual service"}</button>
             </form>
-            <section className="control-list"><h2>Recent processing & other services</h2>{(data?.manualServices ?? []).map((service) => <div key={service.id}><span><strong>{service.service_number}</strong><small>{service.description} - {clientById.get(service.client_id) ?? "Unknown client"}</small></span><span>{Number(service.quantity).toLocaleString()} {service.unit_label}<small>ETB {Number(service.total_amount).toLocaleString()}</small></span><Status value="UNBILLED" /></div>)}{!data?.manualServices.length && <div className="empty-operation"><Archive size={20} /><strong>No manual services</strong><small>Nothing is charged until staff record completed work.</small></div>}</section>
           </div>
         </section>
+        )}
+        {activeServiceTab === "LABOUR" && (
+        <>
         <div className="tariff-warning">
           <AlertTriangle size={18} />
           <div>
@@ -1057,7 +1156,7 @@ export function WarehouseControls({
           <article><UsersRound size={18} /><span>1. Hayked cost<strong>Internal record</strong><small>This is a cost record, not proof that a worker was paid.</small></span></article>
           <article><Banknote size={18} /><span>2. Client charge<strong>Unbilled service</strong><small>Finance reviews it before adding it to an invoice.</small></span></article>
         </section>
-        <div className="control-layout">
+        <div className="service-focused-form">
           <form className="control-form" onSubmit={addLabour}>
             <header>
               <UsersRound size={19} />
@@ -1219,41 +1318,51 @@ export function WarehouseControls({
               Record labour and service event
             </button>
           </form>
-          <section className="control-list labour-record-list">
-            <h2>Recent labour entries</h2>
-            {(data?.labourRecords ?? []).map((entry) => (
-              <div key={entry.id}>
-                <span>
-                  <strong>{entry.labour_number}</strong>
-                  <small>
-                    {entry.activity} -{" "}
-                    {clientById.get(entry.client_id) ?? "Unknown client"}
-                  </small>
-                </span>
-                <span>
-                  Internal ETB{" "}
-                  {Number(entry.internal_cost_etb).toLocaleString()}
-                  <small>
-                    Client charge ETB{" "}
-                    {Number(entry.client_charge_etb).toLocaleString()} ·
-                    difference ETB{" "}
-                    {Number(entry.charge_addition_etb).toLocaleString()}
-                  </small>
-                </span>
-                <Status
-                  value={entry.service_event_id ? "UNBILLED" : "INCOMPLETE"}
-                />
-              </div>
-            ))}
-            {!data?.labourRecords.length && (
-              <div className="empty-operation">
-                <UsersRound size={20} />
-                <strong>No labour entries</strong>
-                <small>Record the first warehouse labour activity.</small>
-              </div>
-            )}
-          </section>
         </div>
+        </>
+        )}
+        {activeServiceTab === "HISTORY" && (
+          <section className="service-history-workspace">
+            <header className="section-title-row">
+              <div>
+                <h2>Recorded work history</h2>
+                <p>Search labour, completed services, and warehouse-rent instructions in one place.</p>
+              </div>
+              <span>{filteredServiceHistory.length.toLocaleString()} record(s) · 10 per page</span>
+            </header>
+            <section className="filter-toolbar service-history-filters" aria-label="Service history filters">
+              <label className="filter-search">
+                <Search size={15} />
+                <input value={historyQuery} onChange={(event) => { setHistoryQuery(event.target.value); setHistoryPage(1); }} placeholder="Search reference, client, or activity" aria-label="Search service history" />
+              </label>
+              <label>Type<select value={historyType} onChange={(event) => { setHistoryType(event.target.value); setHistoryPage(1); }}><option value="ALL">All records</option><option value="LABOUR">Labour</option><option value="SERVICES">Services</option><option value="RENT">Warehouse rent</option></select></label>
+              <label>From<input type="date" value={historyFrom} onChange={(event) => { setHistoryFrom(event.target.value); setHistoryPage(1); }} /></label>
+              <label>To<input type="date" min={historyFrom || undefined} value={historyTo} onChange={(event) => { setHistoryTo(event.target.value); setHistoryPage(1); }} /></label>
+              <button className="secondary-button" type="button" onClick={() => { setHistoryQuery(""); setHistoryType("ALL"); setHistoryFrom(""); setHistoryTo(""); setHistoryPage(1); }}>Reset</button>
+            </section>
+            <div className="record-panel service-history-table-wrap">
+              <div className="record-table service-history-cols">
+                <div className="table-head"><span>Date</span><span>Reference</span><span>Type</span><span>Client / activity</span><span>Internal cost</span><span>Client charge</span><span>Status</span></div>
+                {visibleServiceHistory.map((row) => (
+                  <div key={row.id}>
+                    <span>{row.date}</span>
+                    <span className="reference">{row.reference}</span>
+                    <span>{row.type === "RENT" ? "Warehouse rent" : row.type === "SERVICES" ? "Service" : "Labour"}</span>
+                    <span><strong>{row.client}</strong><small>{row.summary}</small></span>
+                    <span>{row.internalAmount === null ? "—" : `ETB ${row.internalAmount.toLocaleString()}`}</span>
+                    <span>{row.clientAmount === null ? "Calculated later" : `ETB ${row.clientAmount.toLocaleString()}`}</span>
+                    <Status value={row.status} />
+                  </div>
+                ))}
+              </div>
+              {!visibleServiceHistory.length && <div className="empty-operation"><History size={22} /><strong>No matching records</strong><small>Change the search, type, or date filters.</small></div>}
+            </div>
+            <footer className="service-history-pagination">
+              <span>Page {Math.min(historyPage, serviceHistoryPageCount)} of {serviceHistoryPageCount}</span>
+              <div><button className="secondary-button" type="button" disabled={historyPage <= 1} onClick={() => setHistoryPage((page) => Math.max(1, page - 1))}>Previous</button><button className="secondary-button" type="button" disabled={historyPage >= serviceHistoryPageCount} onClick={() => setHistoryPage((page) => Math.min(serviceHistoryPageCount, page + 1))}>Next</button></div>
+            </footer>
+          </section>
+        )}
       </div>
     );
 

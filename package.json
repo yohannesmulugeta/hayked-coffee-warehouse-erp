@@ -9,7 +9,11 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "npm run build && node --experimental-strip-types --test tests/rendered-html.test.mjs tests/grn-workflow.test.mjs tests/processing-workflow.test.mjs tests/warehouse-control-rules.test.mjs tests/release-workflow.test.mjs tests/finance-rules.test.mjs tests/management-rules.test.mjs tests/supabase-foundation.test.mjs tests/warehouse-controls-persistence.test.mjs tests/enterprise-features.test.mjs tests/processing-lot-concurrency.test.mjs tests/ux-simplification.test.mjs",
+    "build:next": "next build",
+    "typecheck": "tsc --noEmit -p tsconfig.next.json",
+    "test:db": "supabase test db",
+    "test:bundle": "node scripts/check-client-bundles.mjs",
+    "test": "npm run build && npm run test:bundle && node --experimental-strip-types --test tests/rendered-html.test.mjs tests/grn-workflow.test.mjs tests/processing-workflow.test.mjs tests/warehouse-control-rules.test.mjs tests/release-workflow.test.mjs tests/finance-rules.test.mjs tests/management-rules.test.mjs tests/supabase-foundation.test.mjs tests/warehouse-controls-persistence.test.mjs tests/enterprise-features.test.mjs tests/processing-lot-concurrency.test.mjs tests/ux-simplification.test.mjs tests/role-permissions.test.mjs tests/ui-format.test.mjs tests/phase2-ui.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
@@ -19,29 +23,30 @@
     "drizzle-orm": "0.45.2",
     "lucide-react": "^0.468.0",
     "next": "16.2.12",
-    "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.37.1",
+    "@cloudflare/vite-plugin": "1.54.2",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
-    "@vitejs/plugin-react": "6.0.2",
-    "@vitejs/plugin-rsc": "0.5.26",
+    "@vitejs/plugin-react": "6.1.1",
+    "@vitejs/plugin-rsc": "0.5.34",
     "drizzle-kit": "0.31.10",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.12",
-    "react-server-dom-webpack": "19.2.6",
+    "react-server-dom-webpack": "19.2.8",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
-    "vinext": "0.0.50",
-    "vite": "8.0.13",
-    "wrangler": "4.92.0"
+    "vinext": "1.0.0-beta.8",
+    "vite": "8.2.2",
+    "wrangler": "4.127.1"
   },
   "overrides": {
-    "postcss": "8.5.25",
+    "nanoid": "3.3.18",
+    "postcss": "8.5.26",
     "sharp": "0.35.3"
   },
   "type": "module"

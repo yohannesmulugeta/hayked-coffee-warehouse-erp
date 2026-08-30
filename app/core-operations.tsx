@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AlertTriangle,
   ArrowRight,
   Check,
   ClipboardCheck,
@@ -46,6 +47,7 @@ import {
 import { activeOn, agreementCountdown, agreementDisplayStatus, agreementExpiryFromTerm, type AgreementTermPreset } from "./client-onboarding";
 import { lotStatusLabel, lotTypeLabel, stockMatches, type StockStatusFilter, type StockTypeFilter } from "./ux-rules";
 import { DetailGrid, DetailSection, EvidenceUploader, RecordDetailDrawer, WorkflowGuide } from "./workflow-ui";
+import { supabaseConfigured } from "@/lib/supabase/client";
 
 const clients: CoreClient[] = [
   { id: "demo-client-1", code: "CL-0015", name: "Guji Specialty Coffee PLC", tin: "0018472635", phone: "+251 911 245 760", email: "-", active: true, agreement: "AGR-2026-011", stock: "44,400 kg", status: "READY" },
@@ -465,9 +467,9 @@ function LotDetail({ lot, receipt, movements, onMovement, onPrintGrn, onPrintTag
 }
 
 export function CoreOperations({ activeView, stockIntent, onNavigate }: { activeView: string; stockIntent?: { type: StockTypeFilter; status: StockStatusFilter; focusId?: string }; onNavigate?: (intent: { view: string; focusId?: string }) => void }) {
-  const [receipts, setReceipts] = useState(initialReceipts);
-  const [lots, setLots] = useState(initialLots);
-  const [movements, setMovements] = useState(initialMovements);
+  const [receipts, setReceipts] = useState(supabaseConfigured ? [] : initialReceipts);
+  const [lots, setLots] = useState(supabaseConfigured ? [] : initialLots);
+  const [movements, setMovements] = useState(supabaseConfigured ? [] : initialMovements);
   const [newReceiptOpen, setNewReceiptOpen] = useState(false);
   const [editReceipt, setEditReceipt] = useState<WarehouseReceipt | null>(null);
   const [masterModal, setMasterModal] = useState<MasterRecordKind | null>(null);
@@ -481,6 +483,7 @@ export function CoreOperations({ activeView, stockIntent, onNavigate }: { active
   const [movementTarget, setMovementTarget] = useState<StockMovement | null>(null);
   const [selectedMaster, setSelectedMaster] = useState<{ kind: "client"; record: CoreClient } | { kind: "agreement"; record: CoreAgreement } | { kind: "representative"; record: CoreRepresentative } | null>(null);
   const [message, setMessage] = useState("");
+  const [databaseError, setDatabaseError] = useState("");
   const [data, setData] = useState<CoreData | null>(null);
   const [stockType, setStockType] = useState<StockTypeFilter>(stockIntent?.type ?? "All");
   const [stockStatus, setStockStatus] = useState<StockStatusFilter>(stockIntent?.status ?? "All");
@@ -489,6 +492,8 @@ export function CoreOperations({ activeView, stockIntent, onNavigate }: { active
   const [agreementFilter, setAgreementFilter] = useState("All");
 
   async function reload() {
+    if (!supabaseConfigured) return;
+    setDatabaseError("");
     try {
       const next = await loadCoreData();
       setData(next);
@@ -496,7 +501,11 @@ export function CoreOperations({ activeView, stockIntent, onNavigate }: { active
       setLots(next.lots);
       setMovements(next.movements);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Warehouse records could not be loaded.");
+      setReceipts([]);
+      setLots([]);
+      setMovements([]);
+      setData(null);
+      setDatabaseError(error instanceof Error ? error.message : "Warehouse records could not be loaded.");
     }
   }
 
@@ -521,6 +530,19 @@ export function CoreOperations({ activeView, stockIntent, onNavigate }: { active
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const stock = useMemo(() => movements.reduce((total, movement) => total + movement.weightDeltaKg, 0), [movements]);
+
+  if (databaseError && !data) {
+    return <div className="module-page">
+      <PageHeader eyebrow="WAREHOUSE DATA" title={activeView} copy="Operational data must come from the warehouse database." />
+      <section className="database-unavailable" role="alert">
+        <AlertTriangle size={26} />
+        <h2>Database unavailable</h2>
+        <p>Unable to load warehouse records. No demo values are being shown.</p>
+        <small>{databaseError}</small>
+        <button className="primary-button" type="button" onClick={() => void reload()}>Retry database connection</button>
+      </section>
+    </div>;
+  }
 
   async function masterRecordSaved(nextMessage: string) {
     await reload();

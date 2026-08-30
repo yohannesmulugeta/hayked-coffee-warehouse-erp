@@ -431,7 +431,7 @@ where tariff.version_code = 'TARIFF-2026-V1'
 on conflict (id) do nothing;
 
 insert into public.storage_billing_runs (id, run_number, client_id, lot_id, category, period_start, period_end, tariff_version, billable_bag_days, total_amount, duplicate_key, status, run_by)
-values ('e2000000-0000-0000-0000-000000000001', 'SBR-2026-0008', '20000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000011', 'PROCESSED_EXPORT', '2026-07-15', '2026-07-31', 'TARIFF-2026-V1', 2550, 2167.50, 'sample|guji|processed|2026-07', 'INVOICED', '10000000-0000-0000-0000-000000000005')
+values ('e2000000-0000-0000-0000-000000000001', 'SBR-2026-0008', '20000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000011', 'PROCESSED_EXPORT', '2026-07-15', '2026-07-31', 'TARIFF-2026-V1', 2550, 2167.50, 'sample|guji|processed|2026-07', 'POSTED', '10000000-0000-0000-0000-000000000005')
 on conflict (id) do nothing;
 
 insert into public.bag_printing_orders (id, order_number, client_id, lot_id, quantity, unit_rate, total_amount, status, prepared_by, approved_by)
@@ -444,7 +444,7 @@ on conflict (id) do nothing;
 
 insert into public.service_events (id, client_id, lot_id, service_type, description, quantity, unit_price, total_amount, reference_id, invoice_id, status)
 values
-  ('e3000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000011', 'STORAGE', 'Processed export storage - July', 1, 145000, 145000, 'e2000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'INVOICED'),
+  ('e3000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000011', 'STORAGE', 'Legacy storage sample awaiting daily evidence', 1, 145000, 145000, 'e2000000-0000-0000-0000-000000000001', null, 'UNBILLED'),
   ('e3000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000011', 'BAG_PRINTING', 'Custom bag printing - 160 bags', 160, 43.48, 6956.80, 'e4000000-0000-0000-0000-000000000001', null, 'UNBILLED'),
   ('e3000000-0000-0000-0000-000000000003', '20000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000001', 'GENERATOR', 'Generator diesel recovery - PRO-2026-0012', 38, 128.50, 4883, 'e5000000-0000-0000-0000-000000000001', null, 'UNBILLED')
 on conflict (id) do nothing;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
-import { evaluateStorageLoss, bagPrintingQuote, generatorActualCost } from "../app/warehouse-control-rules.ts";
+import { evaluateStorageLoss, bagPrintingQuote, filterServiceHistory, generatorActualCost, paginateServiceHistory } from "../app/warehouse-control-rules.ts";
 
 test("warehouse controls migration enforces RLS, maker-checker, and stock movement integrity", () => {
   const migration = readdirSync("supabase/migrations").find((name) => name.endsWith("_warehouse_controls_and_billing.sql"));
@@ -54,6 +54,34 @@ test("storage loss and bag control rule mechanics operate as expected", () => {
 
   const genCost = generatorActualCost(50, 130);
   assert.equal(genCost, 6500);
+});
+
+test("service history is searchable, filterable, and limited to ten rows per page", () => {
+  const rows = Array.from({ length: 14 }, (_, index) => ({
+    id: `row-${index}`,
+    type: index % 2 === 0 ? "LABOUR" : "SERVICE",
+    date: `2026-08-${String(index + 1).padStart(2, "0")}`,
+    searchText: index === 12 ? "guji special handling" : `client ${index}`,
+  }));
+
+  assert.deepEqual(
+    filterServiceHistory(rows, { query: "guji", type: "ALL", from: "", to: "" }).map((row) => row.id),
+    ["row-12"],
+  );
+  assert.equal(filterServiceHistory(rows, { query: "", type: "LABOUR", from: "2026-08-05", to: "2026-08-11" }).length, 4);
+  assert.deepEqual(paginateServiceHistory(rows, 1).map((row) => row.id), rows.slice(0, 10).map((row) => row.id));
+  assert.deepEqual(paginateServiceHistory(rows, 2).map((row) => row.id), rows.slice(10).map((row) => row.id));
+});
+
+test("labour and services exposes four focused workspaces", () => {
+  const source = readFileSync("app/warehouse-controls.tsx", "utf8");
+  assert.match(source, /role="tablist"/);
+  for (const label of ["Labour", "Services", "Warehouse Rent", "History"]) {
+    assert.match(source, new RegExp(`>${label}<`));
+  }
+  assert.match(source, /activeServiceTab === "HISTORY"/);
+  assert.match(source, /Search reference, client, or activity/);
+  assert.match(source, /10 per page/);
 });
 
 test("storage billing is tariff-authoritative and preserves daily calculation rows", () => {

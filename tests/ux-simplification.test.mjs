@@ -109,7 +109,9 @@ test("daily work has direct, plain-language actions and complete finance evidenc
   assert.match(clients, /This agreement tells the ERP/);
   assert.match(processing, /Save first, then attach the request file/);
   assert.match(processing, /Complete ECX check/);
-  assert.match(processing, /Details & files/);
+  assert.match(processing, /Request & ECX/);
+  assert.match(processing, /Order & files/);
+  assert.doesNotMatch(processing, />Details & files</);
   assert.match(dispatch, /Open dispatch report/);
   assert.match(dispatch, /Fix missing document information/);
   assert.match(dispatch, /Post transfer departure/);

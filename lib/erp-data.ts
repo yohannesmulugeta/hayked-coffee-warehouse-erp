@@ -2,6 +2,7 @@ import { createSupabaseClient } from "./supabase/client";
 import { activeOn, clientReadiness } from "@/app/client-onboarding";
 import type { CoffeeLot, StockMovement, WarehouseReceipt } from "@/app/grn-workflow";
 import type { ProcessingOutputLine, ProcessingRequest, ProcessingRequestLine } from "@/app/processing-workflow";
+import { countLabel } from "./ui-format";
 
 type DbError = { message: string; code?: string } | null;
 
@@ -11,7 +12,7 @@ export function friendlyDatabaseError(error: DbError, fallback = "The record cou
   if (error.code === "PGRST116" || error.message.includes("Cannot coerce")) return "The selected record was not found. Refresh the page and select it again.";
   if (error.code === "42501" || /permission|policy|row-level security/i.test(error.message)) return "Your account does not have permission to perform this action.";
   if (/JWT|API key|not signed in/i.test(error.message)) return "Your session is not valid. Sign in again.";
-  if (/already exists|valid .*date range|cannot start before|does not belong|no independently verified tariff|has no rate|no billable storage charge/i.test(error.message)) return error.message;
+  if (/already exists|valid .*date range|cannot start before|cannot start until ECX|does not belong|no independently verified (?:tariff|catalog rate)|has no rate|does not match the approved catalog rate|lacks .* evidence|rate is not yet approved|no billable storage charge/i.test(error.message)) return error.message;
   return fallback;
 }
 
@@ -142,9 +143,9 @@ export async function loadDashboardData(): Promise<DashboardData> {
       { label: "Client Rejects", value: rejects.kg, unit: "kg", detail: `${rejects.bags.toLocaleString()} bags` },
     ],
     mini: [
-      { label: "Coffee in Processing", value: `${orders.filter((item) => item.status === "IN_PROCESS").reduce((sum, item) => sum + Number(item.input_kg), 0).toLocaleString()} kg`, detail: `${orders.filter((item) => item.status === "IN_PROCESS").length} active orders` },
-      { label: "Waiting for Processing", value: `${orders.filter((item) => item.status === "QUEUED").length} orders`, detail: `${orders.filter((item) => item.status === "QUEUED").reduce((sum, item) => sum + Number(item.input_kg), 0).toLocaleString()} kg queued` },
-      { label: "Awaiting Dispatch", value: `${activeLots.filter((item) => item.status === "AWAITING_DISPATCH").length} lots`, detail: "Approved stock ready for release checks" },
+      { label: "Coffee in Processing", value: `${orders.filter((item) => item.status === "IN_PROCESS").reduce((sum, item) => sum + Number(item.input_kg), 0).toLocaleString()} kg`, detail: `${countLabel(orders.filter((item) => item.status === "IN_PROCESS").length, "active order")}` },
+      { label: "Waiting for Processing", value: countLabel(orders.filter((item) => item.status === "QUEUED").length, "order"), detail: `${orders.filter((item) => item.status === "QUEUED").reduce((sum, item) => sum + Number(item.input_kg), 0).toLocaleString()} kg queued` },
+      { label: "Awaiting Dispatch", value: countLabel(activeLots.filter((item) => item.status === "AWAITING_DISPATCH").length, "lot"), detail: "Approved stock ready for release checks" },
       { label: "Hayked Byproducts", value: `${metric((item) => item.ownership_type === "HAYKED").kg.toLocaleString()} kg`, detail: "Separate ownership ledger" },
     ],
     movements: movementDays,
@@ -1045,13 +1046,14 @@ export type WarehouseControlData = {
   labourRecords: { id: string; labour_number: string; work_date: string; client_id: string; lot_id: string | null; processing_order_id: string | null; dispatch_id: string | null; activity: string; quantity: number; unit_label: string; internal_cost_etb: number; charge_addition_etb: number; client_charge_etb: number; note: string | null; external_reference: string | null; service_event_id: string | null; created_at: string }[];
   storageLosses: { id: string; lot_id: string; measured_balance_kg: number; loss_kg: number; loss_percent: number; status: string; created_at: string }[];
   manualServices: { id: string; service_number: string; client_id: string; processing_order_id: string | null; service_code: string; service_date: string; description: string; quantity: number; unit_label: string; unit_price: number; total_amount: number; approved_by: string; evidence_reference: string | null; note: string | null; service_event_id: string; created_at: string }[];
+  serviceRates: { id: string; service_code: string; description: string; unit_label: string; unit_price: number; effective_from: string; effective_to: string | null; active: boolean }[];
   storageRentRecords: StorageRentRecordRow[];
 };
 
 export async function loadWarehouseControlData(): Promise<WarehouseControlData> {
   const db = createSupabaseClient();
   const userId = await currentUserId();
-  const [clients, lots, profiles, processingOrders, bagOrders, generatorRequests, labourSettings, labourRecords, storageLosses, manualServices, storageRentRecords] = await Promise.all([
+  const [clients, lots, profiles, processingOrders, bagOrders, generatorRequests, labourSettings, labourRecords, storageLosses, manualServices, serviceRates, storageRentRecords] = await Promise.all([
     db.from("clients").select("id,code,legal_name,tin,active").order("legal_name"),
     db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,bag_count,quantity_kg,section,status").order("lot_number"),
     db.from("profiles").select("id,full_name,role,active").order("full_name"),
@@ -1062,6 +1064,7 @@ export async function loadWarehouseControlData(): Promise<WarehouseControlData> 
     db.from("labour_records").select("id,labour_number,work_date,client_id,lot_id,processing_order_id,dispatch_id,activity,quantity,unit_label,internal_cost_etb,charge_addition_etb,client_charge_etb,note,external_reference,service_event_id,created_at").order("created_at", { ascending: false }),
     db.from("storage_losses").select("id,lot_id,measured_balance_kg,loss_kg,loss_percent,status,created_at").order("created_at", { ascending: false }),
     db.from("manual_service_records").select("id,service_number,client_id,processing_order_id,service_code,service_date,description,quantity,unit_label,unit_price,total_amount,approved_by,evidence_reference,note,service_event_id,created_at").order("created_at", { ascending: false }),
+    db.from("service_rate_catalog").select("id,service_code,description,unit_label,unit_price,effective_from,effective_to,active").eq("active", true).order("service_code").order("effective_from", { ascending: false }),
     db.from("storage_rent_records").select("id,rent_number,client_id,lot_id,storage_category,charge_start_on,billed_through_on,status,evidence_reference,note,recorded_by,created_at,updated_at").order("created_at", { ascending: false }),
   ]);
   return {
@@ -1076,6 +1079,7 @@ export async function loadWarehouseControlData(): Promise<WarehouseControlData> 
     labourRecords: result(labourRecords.data as WarehouseControlData["labourRecords"] | null, labourRecords.error),
     storageLosses: result(storageLosses.data as WarehouseControlData["storageLosses"] | null, storageLosses.error),
     manualServices: result(manualServices.data as WarehouseControlData["manualServices"] | null, manualServices.error),
+    serviceRates: result(serviceRates.data as WarehouseControlData["serviceRates"] | null, serviceRates.error),
     storageRentRecords: result(storageRentRecords.data as StorageRentRecordRow[] | null, storageRentRecords.error),
   };
 }
