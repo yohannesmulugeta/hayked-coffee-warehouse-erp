@@ -14,7 +14,7 @@ export async function GET() {
   }
 
   try {
-    const response = await fetch(`${url}/rest/v1/organizations?select=id&limit=1`, {
+    const response = await fetch(`${url}/rest/v1/`, {
       headers: {
         apikey: serviceRoleKey,
         Authorization: `Bearer ${serviceRoleKey}`,

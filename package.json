@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.next.json",
     "test:db": "supabase test db",
     "test:bundle": "node scripts/check-client-bundles.mjs",
-    "test": "npm run build && npm run test:bundle && node --experimental-strip-types --test tests/rendered-html.test.mjs tests/grn-workflow.test.mjs tests/processing-workflow.test.mjs tests/warehouse-control-rules.test.mjs tests/release-workflow.test.mjs tests/finance-rules.test.mjs tests/management-rules.test.mjs tests/supabase-foundation.test.mjs tests/warehouse-controls-persistence.test.mjs tests/enterprise-features.test.mjs tests/processing-lot-concurrency.test.mjs tests/ux-simplification.test.mjs tests/role-permissions.test.mjs tests/ui-format.test.mjs tests/phase2-ui.test.mjs",
+    "test": "npm run build && npm run test:bundle && node --experimental-strip-types --test tests/rendered-html.test.mjs tests/grn-workflow.test.mjs tests/processing-workflow.test.mjs tests/warehouse-control-rules.test.mjs tests/release-workflow.test.mjs tests/finance-rules.test.mjs tests/management-rules.test.mjs tests/supabase-foundation.test.mjs tests/warehouse-controls-persistence.test.mjs tests/enterprise-features.test.mjs tests/processing-lot-concurrency.test.mjs tests/ux-simplification.test.mjs tests/role-permissions.test.mjs tests/ui-format.test.mjs tests/phase2-ui.test.mjs tests/health-route.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
