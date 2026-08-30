@@ -656,9 +656,10 @@ export async function receiveEcxTransfer(input: { transferId: string; receivedKg
   return data as string;
 }
 
-export type InvoiceRow = { id: string; invoice_number: string; client_id: string; tariff_version: string; subtotal_etb: number; tax_etb: number; total_etb: number; status: string; issued_on: string | null; due_on: string | null; line_snapshot: { description: string; quantity: number; rate_etb: number }[] };
+export type InvoiceRow = { id: string; invoice_number: string; client_id: string; tariff_version: string; subtotal_etb: number; tax_etb: number; total_etb: number; status: string; issued_on: string | null; due_on: string | null; created_at: string; line_snapshot: { service_event_id?: string; service_type?: string; description: string; quantity: number; rate_etb: number; amount_etb?: number; reference_id?: string | null; reference_type?: string | null }[] };
 export type PaymentRow = { id: string; payment_number: string; invoice_id: string; client_id: string; amount_etb: number; bank_reference: string; paid_at: string; direction: string; payment_method: string; payer_name: string | null; financial_institution: string | null; payment_note: string | null };
 export type ServiceEventRow = { id: string; client_id: string; service_type: string; description: string; quantity: number; unit_price: number; total_amount: number; reference_id: string | null; reference_type: string | null; service_date: string; unit_label: string; invoice_id: string | null; status: string; created_at: string };
+export type StorageRentRecordRow = { id: string; rent_number: string; client_id: string; lot_id: string; storage_category: string; charge_start_on: string; billed_through_on: string | null; status: string; evidence_reference: string | null; note: string | null; recorded_by: string; created_at: string; updated_at: string };
 export type TariffLineItemRow = { id: string; tariff_version_id: string; category: string; age_start_days: number; age_end_days: number | null; daily_rate_per_unit: number; certified: boolean };
 export type StorageQuoteRow = { date: string; openingBags: number; movementBags: number; closingBags: number; ageDay: number; rate: number; units: number; amount: number; references: string[] };
 export type StorageQuote = { tariffVersion: string; duplicateKey: string; billableBagDays: number; amount: number; rows: StorageQuoteRow[] };
@@ -670,14 +671,15 @@ export type FinanceData = {
   movements: { lot_id: string; bag_delta: number; occurred_at: string; reference_type: string }[];
   tariffs: { id: string; version_code: string; description: string | null; effective_from: string; effective_to: string | null; active: boolean; verified_by_1: string | null; verified_by_2: string | null }[];
   tariffLineItems: TariffLineItemRow[];
-  storageRuns: { id: string; duplicate_key: string; client_id: string; lot_id: string; run_number: string; total_amount: number; status: string }[];
+  storageRuns: { id: string; duplicate_key: string; client_id: string; lot_id: string; storage_rent_record_id: string | null; run_number: string; total_amount: number; status: string }[];
+  storageRentRecords: StorageRentRecordRow[];
   serviceEvents: ServiceEventRow[];
 };
 
 export async function loadFinanceData(): Promise<FinanceData> {
   const db = createSupabaseClient();
-  const [invoiceResult, paymentResult, clientResult, lotResult, receiptResult, movementResult, tariffResult, tariffLineResult, storageRunResult, serviceEventResult] = await Promise.all([
-    db.from("invoices").select("id,invoice_number,client_id,tariff_version,subtotal_etb,tax_etb,total_etb,status,issued_on,due_on,line_snapshot").order("created_at", { ascending: false }),
+  const [invoiceResult, paymentResult, clientResult, lotResult, receiptResult, movementResult, tariffResult, tariffLineResult, storageRunResult, storageRentResult, serviceEventResult] = await Promise.all([
+    db.from("invoices").select("id,invoice_number,client_id,tariff_version,subtotal_etb,tax_etb,total_etb,status,issued_on,due_on,created_at,line_snapshot").order("created_at", { ascending: false }),
     db.from("payments").select("id,payment_number,invoice_id,client_id,amount_etb,bank_reference,paid_at,direction,payment_method,payer_name,financial_institution,payment_note").order("paid_at", { ascending: false }),
     db.from("clients").select("id,code,legal_name,tin,phone,email,active").order("legal_name"),
     db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,bag_count,quantity_kg,section,status,certification_status,certification_schemes,certificate_number,certification_issuer,certification_valid_from,certification_valid_to").order("lot_number"),
@@ -685,7 +687,8 @@ export async function loadFinanceData(): Promise<FinanceData> {
     db.from("stock_movements").select("lot_id,bag_delta,occurred_at,reference_type").order("occurred_at"),
     db.from("tariff_versions").select("id,version_code,description,effective_from,effective_to,active,verified_by_1,verified_by_2").order("effective_from", { ascending: false }),
     db.from("tariff_line_items").select("id,tariff_version_id,category,age_start_days,age_end_days,daily_rate_per_unit,certified").order("category").order("age_start_days"),
-    db.from("storage_billing_runs").select("id,duplicate_key,client_id,lot_id,run_number,total_amount,status").order("created_at", { ascending: false }),
+    db.from("storage_billing_runs").select("id,duplicate_key,client_id,lot_id,storage_rent_record_id,run_number,total_amount,status").order("created_at", { ascending: false }),
+    db.from("storage_rent_records").select("id,rent_number,client_id,lot_id,storage_category,charge_start_on,billed_through_on,status,evidence_reference,note,recorded_by,created_at,updated_at").order("created_at", { ascending: false }),
     db.from("service_events").select("id,client_id,service_type,description,quantity,unit_price,total_amount,reference_id,reference_type,service_date,unit_label,invoice_id,status,created_at").order("created_at", { ascending: false }),
   ]);
   const receiptDates = new Map((receiptResult.data ?? []).map((item) => [item.id, item.arrival_at]));
@@ -698,6 +701,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
     tariffs: result(tariffResult.data as FinanceData["tariffs"] | null, tariffResult.error),
     tariffLineItems: result(tariffLineResult.data as TariffLineItemRow[] | null, tariffLineResult.error),
     storageRuns: result(storageRunResult.data as FinanceData["storageRuns"] | null, storageRunResult.error),
+    storageRentRecords: result(storageRentResult.data as StorageRentRecordRow[] | null, storageRentResult.error),
     serviceEvents: result(serviceEventResult.data as ServiceEventRow[] | null, serviceEventResult.error),
   };
 }
@@ -715,6 +719,14 @@ export async function recordPayment(input: { invoiceId: string; amount: number; 
   });
   if (error) throw new Error(error.message);
   return data as { id: string; payment_number: string; invoice_status: string };
+}
+
+export async function createInvoiceDraft(serviceEventIds: string[]) {
+  const { data, error } = await createSupabaseClient().rpc("create_invoice_draft_from_services", {
+    p_service_event_ids: serviceEventIds,
+  });
+  if (error) throw new Error(friendlyDatabaseError(error, "The invoice draft could not be prepared."));
+  return data as { id: string; invoice_number: string; client_id: string; subtotal_etb: number; status: string };
 }
 
 export type ApprovalDetail = { title: string; client: string; status: string; fields: { label: string; value: string }[]; documentCount: number; auditCount: number };
@@ -1033,12 +1045,13 @@ export type WarehouseControlData = {
   labourRecords: { id: string; labour_number: string; work_date: string; client_id: string; lot_id: string | null; processing_order_id: string | null; dispatch_id: string | null; activity: string; quantity: number; unit_label: string; internal_cost_etb: number; charge_addition_etb: number; client_charge_etb: number; note: string | null; external_reference: string | null; service_event_id: string | null; created_at: string }[];
   storageLosses: { id: string; lot_id: string; measured_balance_kg: number; loss_kg: number; loss_percent: number; status: string; created_at: string }[];
   manualServices: { id: string; service_number: string; client_id: string; processing_order_id: string | null; service_code: string; service_date: string; description: string; quantity: number; unit_label: string; unit_price: number; total_amount: number; approved_by: string; evidence_reference: string | null; note: string | null; service_event_id: string; created_at: string }[];
+  storageRentRecords: StorageRentRecordRow[];
 };
 
 export async function loadWarehouseControlData(): Promise<WarehouseControlData> {
   const db = createSupabaseClient();
   const userId = await currentUserId();
-  const [clients, lots, profiles, processingOrders, bagOrders, generatorRequests, labourSettings, labourRecords, storageLosses, manualServices] = await Promise.all([
+  const [clients, lots, profiles, processingOrders, bagOrders, generatorRequests, labourSettings, labourRecords, storageLosses, manualServices, storageRentRecords] = await Promise.all([
     db.from("clients").select("id,code,legal_name,tin,active").order("legal_name"),
     db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,bag_count,quantity_kg,section,status").order("lot_number"),
     db.from("profiles").select("id,full_name,role,active").order("full_name"),
@@ -1049,6 +1062,7 @@ export async function loadWarehouseControlData(): Promise<WarehouseControlData> 
     db.from("labour_records").select("id,labour_number,work_date,client_id,lot_id,processing_order_id,dispatch_id,activity,quantity,unit_label,internal_cost_etb,charge_addition_etb,client_charge_etb,note,external_reference,service_event_id,created_at").order("created_at", { ascending: false }),
     db.from("storage_losses").select("id,lot_id,measured_balance_kg,loss_kg,loss_percent,status,created_at").order("created_at", { ascending: false }),
     db.from("manual_service_records").select("id,service_number,client_id,processing_order_id,service_code,service_date,description,quantity,unit_label,unit_price,total_amount,approved_by,evidence_reference,note,service_event_id,created_at").order("created_at", { ascending: false }),
+    db.from("storage_rent_records").select("id,rent_number,client_id,lot_id,storage_category,charge_start_on,billed_through_on,status,evidence_reference,note,recorded_by,created_at,updated_at").order("created_at", { ascending: false }),
   ]);
   return {
     currentUserId: userId,
@@ -1062,6 +1076,7 @@ export async function loadWarehouseControlData(): Promise<WarehouseControlData> 
     labourRecords: result(labourRecords.data as WarehouseControlData["labourRecords"] | null, labourRecords.error),
     storageLosses: result(storageLosses.data as WarehouseControlData["storageLosses"] | null, storageLosses.error),
     manualServices: result(manualServices.data as WarehouseControlData["manualServices"] | null, manualServices.error),
+    storageRentRecords: result(storageRentRecords.data as StorageRentRecordRow[] | null, storageRentRecords.error),
   };
 }
 
@@ -1093,6 +1108,26 @@ export async function postManualService(input: {
   });
   if (error) throw new Error(friendlyDatabaseError(error, "The service could not be recorded."));
   return data as { id: string; service_number: string; service_event_id: string; total_amount: number };
+}
+
+export async function recordStorageRent(input: {
+  clientId: string;
+  lotId: string;
+  storageCategory: string;
+  chargeStartOn: string;
+  evidenceReference?: string;
+  note?: string;
+}) {
+  const { data, error } = await createSupabaseClient().rpc("record_storage_rent", {
+    p_client_id: input.clientId,
+    p_lot_id: input.lotId,
+    p_storage_category: input.storageCategory,
+    p_charge_start_on: input.chargeStartOn,
+    p_evidence_reference: input.evidenceReference?.trim() || null,
+    p_note: input.note?.trim() || null,
+  });
+  if (error) throw new Error(friendlyDatabaseError(error, "Warehouse rent could not be recorded."));
+  return data as StorageRentRecordRow;
 }
 
 export async function postLabourEntry(input: {
@@ -1223,6 +1258,20 @@ export async function runStorageBilling(input: {
   });
   if (error) throw new Error(friendlyDatabaseError(error, "Failed to run storage billing."));
   return data as string;
+}
+
+export async function postStorageRentBilling(input: {
+  rentRecordId: string;
+  periodEnd: string;
+  tariffVersion: string;
+}) {
+  const { data, error } = await createSupabaseClient().rpc("post_storage_rent_billing", {
+    p_rent_record_id: input.rentRecordId,
+    p_period_end: input.periodEnd,
+    p_tariff_version: input.tariffVersion,
+  });
+  if (error) throw new Error(friendlyDatabaseError(error, "Warehouse rent billing could not be posted."));
+  return data as { rent_record_id: string; storage_billing_run_id: string; period_start: string; period_end: string };
 }
 
 export async function postEcsTransfer(input: {

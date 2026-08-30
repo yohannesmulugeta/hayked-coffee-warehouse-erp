@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Archive,
   Banknote,
+  CalendarDays,
   Check,
   Droplets,
   Fuel,
@@ -25,6 +26,7 @@ import {
   postGeneratorRequest,
   postLabourEntry,
   postManualService,
+  recordStorageRent,
   postStorageLoss,
   type WarehouseControlData,
 } from "@/lib/erp-data";
@@ -132,6 +134,15 @@ export function WarehouseControls({
   const [manualNote, setManualNote] = useState("");
   const [manualBusy, setManualBusy] = useState(false);
 
+  const [showRentRecording, setShowRentRecording] = useState(false);
+  const [rentClientId, setRentClientId] = useState("");
+  const [rentLotId, setRentLotId] = useState("");
+  const [rentCategory, setRentCategory] = useState("WAITING_PROCESSING");
+  const [rentStartOn, setRentStartOn] = useState(new Date().toISOString().slice(0, 10));
+  const [rentEvidenceReference, setRentEvidenceReference] = useState("");
+  const [rentNote, setRentNote] = useState("");
+  const [rentBusy, setRentBusy] = useState(false);
+
   const [dieselLitres, setDieselLitres] = useState(45);
   const [dieselUnitCost, setDieselUnitCost] = useState(128.5);
   const [generatorClientId, setGeneratorClientId] = useState("");
@@ -180,6 +191,8 @@ export function WarehouseControls({
     ) ?? [];
   const manualOrders = data?.processingOrders.filter((item) => item.client_id === manualClientId && item.status === "POSTED") ?? [];
   const manualNeedsProcessingOrder = ["PROCESSING", "HULLING", "CLEANING"].includes(manualServiceCode);
+  const activeRentLotIds = new Set((data?.storageRentRecords ?? []).filter((item) => item.status === "ACTIVE").map((item) => item.lot_id));
+  const rentLots = data?.lots.filter((item) => item.client_id === rentClientId && Number(item.quantity_kg) > 0 && !activeRentLotIds.has(item.id)) ?? [];
   const lossLots =
     data?.lots.filter(
       (item) =>
@@ -396,6 +409,42 @@ export function WarehouseControls({
       setMessage(error instanceof Error ? error.message : "The service could not be recorded.");
     } finally {
       setManualBusy(false);
+    }
+  }
+
+  async function addStorageRent(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!rentClientId || !rentLotId) {
+      setMessage("Select the client and coffee lot that needs warehouse rent recorded.");
+      return;
+    }
+    setRentBusy(true);
+    try {
+      const record = await recordStorageRent({
+        clientId: rentClientId,
+        lotId: rentLotId,
+        storageCategory: rentCategory,
+        chargeStartOn: rentStartOn,
+        evidenceReference: rentEvidenceReference,
+        note: rentNote,
+      });
+      await reload();
+      setLastEvidence({
+        type: "STORAGE_RENT",
+        id: record.id,
+        label: record.rent_number,
+        documentType: "STORAGE_RENT_EVIDENCE",
+        title: "Warehouse rent instruction evidence",
+      });
+      setRentClientId("");
+      setRentLotId("");
+      setRentEvidenceReference("");
+      setRentNote("");
+      setMessage(`${record.rent_number} recorded. No money was charged; finance will calculate only unbilled storage days later.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Warehouse rent could not be recorded.");
+    } finally {
+      setRentBusy(false);
     }
   }
 
@@ -946,8 +995,28 @@ export function WarehouseControls({
         <section className="service-workspace-overview">
           <article><UsersRound size={18} /><div><strong>Labour</strong><p>Records Hayked&apos;s internal cost and a separate client charge for finance review.</p></div></article>
           <article><Archive size={18} /><div><strong>Processing & other services</strong><p>Created only when staff deliberately record completed work below. Never automatic.</p></div></article>
-          <button type="button" onClick={() => onNavigate?.({ view: "Finance" })}><Banknote size={18} /><span><strong>Warehouse rent</strong><small>Calculated by client, lot, dates, movements, and verified storage rates in Billing → Storage Review.</small></span></button>
+          <button type="button" onClick={() => setShowRentRecording((current) => !current)}><Banknote size={18} /><span><strong>Warehouse rent</strong><small>Record the client and lot now. Finance calculates verified daily rent later.</small></span></button>
         </section>
+        {showRentRecording && (
+          <section className="service-recording-section">
+            <div className="section-title-row"><div><h2>Record warehouse rent</h2><p className="form-note">This saves a billing instruction only. It does not create an amount, service charge, or invoice.</p></div><Status value="RECORD ONLY" /></div>
+            <div className="control-layout">
+              <form className="control-form" onSubmit={addStorageRent}>
+                <header><CalendarDays size={19} /><div><h2>New rent instruction</h2><p>Record once; the system tracks the last billed day to prevent duplicate rent.</p></div></header>
+                <div className="control-fields">
+                  <label>Client<select required value={rentClientId} onChange={(event) => { setRentClientId(event.target.value); setRentLotId(""); }}><option value="" disabled>Select client</option>{clients.map((item) => <option key={item.id} value={item.id}>{item.code} - {item.legal_name}</option>)}</select></label>
+                  <label>Coffee lot<select required value={rentLotId} disabled={!rentClientId} onChange={(event) => setRentLotId(event.target.value)}><option value="">{rentClientId ? "Select an unrecorded active lot" : "Select client first"}</option>{rentLots.map((item) => <option key={item.id} value={item.id}>{item.lot_number} - {Number(item.bag_count).toLocaleString()} bags</option>)}</select></label>
+                  <label>Charge start date<input type="date" required max={new Date().toISOString().slice(0, 10)} value={rentStartOn} onChange={(event) => setRentStartOn(event.target.value)} /></label>
+                  <label>Storage category<select value={rentCategory} onChange={(event) => setRentCategory(event.target.value)}><option value="NO_PROCESSING">Stored without processing</option><option value="WAITING_PROCESSING">Waiting for processing</option><option value="PROCESSED_EXPORT">Processed export</option><option value="GRADE_IMPROVEMENT">Grade improvement</option><option value="REJECT">Reject coffee</option><option value="EMPTY_BAGS">Empty bags</option></select></label>
+                  <label>Evidence reference<input value={rentEvidenceReference} onChange={(event) => setRentEvidenceReference(event.target.value)} placeholder="Storage instruction or client request" /></label>
+                  <label className="wide">Note<textarea rows={2} value={rentNote} onChange={(event) => setRentNote(event.target.value)} placeholder="Optional operational note" /></label>
+                </div>
+                <button className="primary-button" type="submit" disabled={rentBusy || !rentClientId || !rentLotId}><Plus size={16} />{rentBusy ? "Recording..." : "Record warehouse rent"}</button>
+              </form>
+              <section className="control-list"><div className="section-title-row"><div><h2>Active rent instructions</h2><p>Finance calculates only days after the billed-through date.</p></div><button className="secondary-button" type="button" onClick={() => onNavigate?.({ view: "Finance" })}>Open billing</button></div>{(data?.storageRentRecords ?? []).filter((item) => item.status === "ACTIVE").map((record) => <div key={record.id}><span><strong>{record.rent_number}</strong><small>{clientById.get(record.client_id) ?? "Unknown client"} · {data?.lots.find((lot) => lot.id === record.lot_id)?.lot_number}</small></span><span>Starts {record.charge_start_on}<small>{record.billed_through_on ? `Billed through ${record.billed_through_on}` : "Not billed yet"}</small></span><Status value={record.status} /></div>)}{!data?.storageRentRecords.some((item) => item.status === "ACTIVE") && <div className="empty-operation"><CalendarDays size={20} /><strong>No active rent instructions</strong><small>Recording rent does not charge the client.</small></div>}</section>
+            </div>
+          </section>
+        )}
         <section className="service-recording-section">
           <div className="section-title-row"><div><h2>Record processing or another service</h2><p className="form-note">Use this only after the work happened. Completing a processing order never charges the client by itself.</p></div><Status value="MANUAL ONLY" /></div>
           <div className="control-layout">

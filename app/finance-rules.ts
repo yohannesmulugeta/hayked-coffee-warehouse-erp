@@ -12,3 +12,40 @@ export function allocatePayment(outstanding: number, amount: number) {
   if (amount > outstanding) throw new Error("Payment allocation cannot exceed the invoice outstanding amount.");
   return Math.round((outstanding - amount) * 100) / 100;
 }
+
+export function paymentPostAction(invoiceStatus: string) {
+  const paid = invoiceStatus === "PAID";
+  return {
+    tab: paid ? "Client Accounts" : "Payments",
+    resetFilters: paid,
+    keepInvoiceFocused: !paid,
+  } as const;
+}
+
+export function nextStorageRentStart(
+  chargeStartOn: string,
+  billedThroughOn: string | null,
+) {
+  if (!billedThroughOn) return chargeStartOn;
+  const next = new Date(`${billedThroughOn}T12:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString().slice(0, 10);
+}
+
+export function invoiceOutstanding(status: string, total: number, paid: number) {
+  if (status === "DRAFT" || status === "VOID") return 0;
+  return Math.max(0, Math.round((total - paid) * 100) / 100);
+}
+
+export function invoiceDisplayStatus(status: string, outstanding: number) {
+  if (status === "DRAFT" || status === "VOID") return status;
+  return outstanding === 0 ? "PAID" : status;
+}
+
+export function invoiceActivityDate(
+  status: string,
+  issuedOn: string | null,
+  createdAt: string,
+) {
+  return status === "DRAFT" ? createdAt : issuedOn;
+}
