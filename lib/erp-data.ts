@@ -28,7 +28,7 @@ async function currentUserId() {
 }
 
 export type ClientRow = { id: string; code: string; legal_name: string; tin: string | null; phone?: string | null; email?: string | null; active: boolean };
-type AgreementRow = { id: string; client_id: string; agreement_number: string; effective_from: string; effective_to: string | null; tariff_version: string; status: string };
+type AgreementRow = { id: string; client_id: string; agreement_number: string; effective_from: string; effective_to: string | null; tariff_version: string; default_bag_weight_kg: number; status: string };
 type RepresentativeRow = { id: string; client_id: string; full_name: string; identity_number: string; phone: string | null; valid_from: string; valid_to: string | null; active: boolean };
 type WarehouseRow = { id: string; name: string };
 type ReceiptRow = {
@@ -39,13 +39,19 @@ type ReceiptRow = {
   weighbridge_reference: string | null; origin: string | null; grade: string | null; crop_year: number | null;
   bag_weight_kg: number | null; gross_weight_kg: number | null; tare_weight_kg: number | null;
   moisture_percent: number | null; wet_coffee: boolean;
+  certification_status: WarehouseReceipt["certificationStatus"];
+  certification_schemes: string[];
+  certificate_number: string | null;
+  certification_issuer: string | null;
+  certification_valid_from: string | null;
+  certification_valid_to: string | null;
 };
-export type LotRow = { id: string; lot_number: string; receipt_id: string | null; warehouse_id?: string; client_id: string; coffee_type: "WASHED" | "UNWASHED_UG"; bag_count: number; quantity_kg: number; section: string; status: CoffeeLot["status"]; lot_category?: EligibleProcessingLot["lot_category"]; ownership_type?: "CLIENT" | "HAYKED"; parent_lot_id?: string | null; source_processing_order_id?: string | null };
-type MovementRow = { id: string; lot_id: string; movement_type: StockMovement["type"]; quantity_kg: number; bag_delta: number; reference_id: string };
+export type LotRow = { id: string; lot_number: string; receipt_id: string | null; warehouse_id?: string; client_id: string; coffee_type: "WASHED" | "UNWASHED_UG"; bag_count: number; quantity_kg: number; section: string; status: CoffeeLot["status"]; lot_category?: EligibleProcessingLot["lot_category"]; ownership_type?: "CLIENT" | "HAYKED"; parent_lot_id?: string | null; source_processing_order_id?: string | null; certification_status?: CoffeeLot["certificationStatus"]; certification_schemes?: string[]; certificate_number?: string | null; certification_issuer?: string | null; certification_valid_from?: string | null; certification_valid_to?: string | null };
+type MovementRow = { id: string; lot_id: string; movement_type: StockMovement["type"]; quantity_kg: number; bag_delta: number; reference_type: string; reference_id: string };
 export type ProfileRow = { id: string; full_name: string; role: string; active: boolean };
 
 export type CoreClient = { id: string; code: string; name: string; tin: string; phone: string; email: string; active: boolean; agreement: string; stock: string; status: string };
-export type CoreAgreement = { id: string; clientId: string; number: string; client: string; source: string; effective: string; effectiveFrom: string; expiry: string; effectiveTo: string | null; tariff: string; status: string };
+export type CoreAgreement = { id: string; clientId: string; number: string; client: string; source: string; effective: string; effectiveFrom: string; expiry: string; effectiveTo: string | null; tariff: string; defaultBagWeightKg: number; status: string };
 export type CoreRepresentative = { id: string; clientId: string; name: string; identityNumber: string; client: string; phone: string; scope: string; validFrom: string; expiry: string; validTo: string | null; status: string };
 
 export type CoreData = {
@@ -173,12 +179,12 @@ export async function loadCoreData(): Promise<CoreData> {
   const db = createSupabaseClient();
   const [clientResult, agreementResult, representativeResult, warehouseResult, receiptResult, lotResult, movementResult, profileResult, tariffResult] = await Promise.all([
     db.from("clients").select("id,code,legal_name,tin,phone,email,active").order("code"),
-    db.from("agreements").select("id,client_id,agreement_number,effective_from,effective_to,tariff_version,status").order("agreement_number"),
+    db.from("agreements").select("id,client_id,agreement_number,effective_from,effective_to,tariff_version,default_bag_weight_kg,status").order("agreement_number"),
     db.from("authorized_representatives").select("id,client_id,full_name,identity_number,phone,valid_from,valid_to,active").order("full_name"),
     db.from("warehouses").select("id,name").eq("active", true),
     db.from("warehouse_receipts").select("*").order("created_at", { ascending: false }),
-    db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,lot_category,ownership_type,bag_count,quantity_kg,section,status").order("created_at", { ascending: false }),
-    db.from("stock_movements").select("id,lot_id,movement_type,quantity_kg,bag_delta,reference_id").order("occurred_at", { ascending: false }),
+    db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,lot_category,ownership_type,bag_count,quantity_kg,section,status,certification_status,certification_schemes,certificate_number,certification_issuer,certification_valid_from,certification_valid_to").order("created_at", { ascending: false }),
+    db.from("stock_movements").select("id,lot_id,movement_type,quantity_kg,bag_delta,reference_type,reference_id").order("occurred_at", { ascending: false }),
     db.from("profiles").select("id,full_name,role,active"),
     db.from("tariff_versions").select("version_code,description,active").order("effective_from", { ascending: false }),
   ]);
@@ -218,7 +224,7 @@ export async function loadCoreData(): Promise<CoreData> {
     agreements: agreements.map((item) => ({
       id: item.id, clientId: item.client_id, number: item.agreement_number, client: clientById.get(item.client_id)?.legal_name ?? "Unknown client",
       source: "001/2018", effective: item.effective_from, effectiveFrom: item.effective_from, expiry: item.effective_to ?? "Open-ended",
-      effectiveTo: item.effective_to, tariff: item.tariff_version, status: item.status,
+      effectiveTo: item.effective_to, tariff: item.tariff_version, defaultBagWeightKg: Number(item.default_bag_weight_kg), status: item.status,
     })),
     representatives: representatives.map((item) => ({
       id: item.id, clientId: item.client_id, name: item.full_name, identityNumber: item.identity_number,
@@ -241,6 +247,9 @@ export async function loadCoreData(): Promise<CoreData> {
       bagWeightKg: Number(item.bag_weight_kg ?? item.net_weight_kg / item.bag_count),
       grossWeightKg: Number(item.gross_weight_kg ?? item.net_weight_kg), tareWeightKg: Number(item.tare_weight_kg ?? 0),
       netWeightKg: Number(item.net_weight_kg), moisturePercent: Number(item.moisture_percent ?? 0), wetCoffee: item.wet_coffee,
+      certificationStatus: item.certification_status ?? "NOT_RECORDED", certificationSchemes: item.certification_schemes ?? [],
+      certificateNumber: item.certificate_number ?? "", certificationIssuer: item.certification_issuer ?? "",
+      certificationValidFrom: item.certification_valid_from ?? "", certificationValidTo: item.certification_valid_to ?? "",
       receivedBy: profileById.get(item.prepared_by)?.full_name ?? "-", createdBy: profileById.get(item.prepared_by)?.full_name ?? "-",
       status: item.status, lotNumber: lotByReceipt.get(item.id)?.lot_number,
     })),
@@ -251,12 +260,16 @@ export async function loadCoreData(): Promise<CoreData> {
         client: clientById.get(item.client_id)?.legal_name ?? "Hayked", coffee: item.coffee_type === "WASHED" ? "Washed" : "Unwashed / UG",
         grade: receipt?.grade ?? "-", section: item.section, bags: item.bag_count, weightKg: Number(item.quantity_kg), status: item.status,
         lotCategory: item.lot_category ?? null, ownershipType: item.ownership_type,
+        certificationStatus: item.certification_status ?? "NOT_RECORDED", certificationSchemes: item.certification_schemes ?? [],
+        certificateNumber: item.certificate_number ?? "", certificationIssuer: item.certification_issuer ?? "",
+        certificationValidFrom: item.certification_valid_from ?? "", certificationValidTo: item.certification_valid_to ?? "",
       };
     }),
     movements: movements.map((item) => ({
       databaseId: item.id, id: item.id.slice(-8).toUpperCase(), sourceGrn: receiptById.get(item.reference_id)?.receipt_number ?? item.reference_id.slice(-8).toUpperCase(),
       lotNumber: lotById.get(item.lot_id)?.lot_number ?? "Unknown lot", type: item.movement_type,
       bagsDelta: item.bag_delta, weightDeltaKg: Number(item.quantity_kg),
+      referenceType: item.reference_type, referenceId: item.reference_id,
     })),
     tariffs: tariffs.map((item) => ({ code: item.version_code, name: item.description?.trim() || "Hayked standard rates", active: item.active })),
   };
@@ -323,6 +336,33 @@ export async function createRepresentative(representative: NewRepresentative) {
   if (error) throw new Error(error.message);
 }
 
+export async function updateAgreement(agreementId: string, agreement: { effectiveFrom: string; effectiveTo: string; status: "DRAFT" | "ACTIVE" | "EXPIRED" | "TERMINATED"; defaultBagWeightKg: number; tariffVersion: string }) {
+  const { data, error } = await createSupabaseClient().rpc("update_client_agreement", {
+    p_agreement_id: agreementId,
+    p_effective_from: agreement.effectiveFrom,
+    p_effective_to: agreement.effectiveTo,
+    p_status: agreement.status,
+    p_default_bag_weight_kg: agreement.defaultBagWeightKg,
+    p_tariff_version: agreement.tariffVersion,
+  });
+  if (error) throw new Error(friendlyDatabaseError(error, "The agreement could not be updated."));
+  return data;
+}
+
+export async function updateRepresentative(representativeId: string, representative: Omit<NewRepresentative, "clientId">) {
+  const { data, error } = await createSupabaseClient().rpc("update_authorized_representative", {
+    p_representative_id: representativeId,
+    p_full_name: representative.fullName,
+    p_identity_number: representative.identityNumber,
+    p_phone: representative.phone,
+    p_valid_from: representative.validFrom,
+    p_valid_to: representative.validTo,
+    p_active: representative.active,
+  });
+  if (error) throw new Error(friendlyDatabaseError(error, "The representative could not be updated."));
+  return data;
+}
+
 export async function createWarehouseReceipt(receipt: WarehouseReceipt) {
   const db = createSupabaseClient();
   const [client, warehouse, userId, numberResult] = await Promise.all([
@@ -356,6 +396,10 @@ export async function createWarehouseReceipt(receipt: WarehouseReceipt) {
     weighbridge_reference: receipt.weighbridgeRef, origin: receipt.origin, grade: receipt.grade, crop_year: receipt.cropYear,
     bag_weight_kg: receipt.bagWeightKg, gross_weight_kg: receipt.grossWeightKg, tare_weight_kg: receipt.tareWeightKg,
     moisture_percent: receipt.moisturePercent, wet_coffee: receipt.wetCoffee,
+    certification_status: receipt.certificationStatus ?? "NOT_RECORDED",
+    certification_schemes: receipt.certificationSchemes ?? [], certificate_number: receipt.certificateNumber?.trim() || null,
+    certification_issuer: receipt.certificationIssuer?.trim() || null,
+    certification_valid_from: receipt.certificationValidFrom || null, certification_valid_to: receipt.certificationValidTo || null,
   });
   if (error) throw new Error(friendlyDatabaseError(error, "The GRN could not be saved."));
   return String(numberResult.data);
@@ -365,7 +409,8 @@ export async function updateWarehouseReceiptDraft(receipt: WarehouseReceipt) {
   if (!receipt.databaseId || !receipt.clientDatabaseId || !receipt.agreementDatabaseId || !receipt.representativeDatabaseId) {
     throw new Error("Refresh the page before editing this GRN.");
   }
-  const { error } = await createSupabaseClient().rpc("update_grn_draft", {
+  const db = createSupabaseClient();
+  const { error } = await db.rpc("update_grn_draft", {
     receipt_id: receipt.databaseId, client_id: receipt.clientDatabaseId, agreement_id: receipt.agreementDatabaseId,
     representative_id: receipt.representativeDatabaseId, arrival_at: receipt.receivedAt,
     coffee_type: receipt.coffeeType === "Washed" ? "WASHED" : "UNWASHED_UG", bag_count: receipt.bags,
@@ -376,6 +421,16 @@ export async function updateWarehouseReceiptDraft(receipt: WarehouseReceipt) {
     moisture_percent: receipt.moisturePercent, wet_coffee: receipt.wetCoffee,
   });
   if (error) throw new Error(friendlyDatabaseError(error, "The draft GRN could not be updated."));
+  const { error: certificationError } = await db.rpc("update_grn_certification", {
+    p_receipt_id: receipt.databaseId,
+    p_status: receipt.certificationStatus ?? "NOT_RECORDED",
+    p_schemes: receipt.certificationSchemes ?? [],
+    p_certificate_number: receipt.certificateNumber?.trim() || null,
+    p_issuer: receipt.certificationIssuer?.trim() || null,
+    p_valid_from: receipt.certificationValidFrom || null,
+    p_valid_to: receipt.certificationValidTo || null,
+  });
+  if (certificationError) throw new Error(friendlyDatabaseError(certificationError, "The certification details could not be updated."));
 }
 
 export async function transitionGrn(receipt: WarehouseReceipt, targetStatus: WarehouseReceipt["status"], reason?: string) {
@@ -523,7 +578,7 @@ export type DispatchRow = { id: string; dispatch_number: string; lot_id: string;
 export type DispatchLineRow = { id: string; dispatch_id: string; line_number: number; lot_id: string; bag_count: number; quantity_kg: number };
 export type StockReservationRow = { id: string; dispatch_id: string | null; processing_order_id: string | null; lot_id: string; reserved_bags: number; reserved_kg: number; status: "ACTIVE" | "CONSUMED" | "RELEASED" };
 export type CreditOverrideRow = { id: string; dispatch_id: string; amount_etb: number; expires_on: string; reason: string; document_reference: string; status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED"; requested_by: string; decided_by: string | null };
-export type EcxTransferRow = { id: string; transfer_number: string; lot_id: string; client_id: string; source_warehouse_id: string; destination_warehouse_id: string; sent_kg: number; sent_bags: number | null; received_kg: number | null; vehicle_plate: string | null; status: "IN_TRANSIT" | "RECEIVED" | "REVERSED"; sent_at: string; received_at: string | null; variance_approved_by: string | null; prepared_by: string };
+export type EcxTransferRow = { id: string; transfer_number: string; lot_id: string; client_id: string; source_warehouse_id: string; destination_warehouse_id: string; sent_kg: number; sent_bags: number | null; received_kg: number | null; vehicle_plate: string | null; status: "IN_TRANSIT" | "RECEIVED" | "REVERSED"; sent_at: string; received_at: string | null; variance_approved_by: string | null; prepared_by: string; transfer_reference: string | null; driver_name: string | null; seal_number: string | null; expected_arrival_on: string | null; departure_document_reference: string | null; destination_document_reference: string | null };
 export type DispatchWarehouseRow = { id: string; code: string; name: string; location: string; active: boolean };
 export type DispatchData = { dispatches: DispatchRow[]; lines: DispatchLineRow[]; reservations: StockReservationRow[]; credits: CreditOverrideRow[]; ecxTransfers: EcxTransferRow[]; warehouses: DispatchWarehouseRow[]; clients: ClientRow[]; lots: LotRow[]; representatives: RepresentativeRow[]; profiles: ProfileRow[]; agreements: { id: string; client_id: string; agreement_number: string; effective_from: string; effective_to: string | null; status: string }[] };
 
@@ -534,10 +589,10 @@ export async function loadDispatchData(): Promise<DispatchData> {
     db.from("dispatch_lines").select("*").order("line_number"),
     db.from("stock_reservations").select("*").order("created_at"),
     db.from("credit_overrides").select("*").order("created_at", { ascending: false }),
-    db.from("ecs_transfers").select("id,transfer_number,lot_id,client_id,source_warehouse_id,destination_warehouse_id,sent_kg,sent_bags,received_kg,vehicle_plate,status,sent_at,received_at,variance_approved_by,prepared_by").order("sent_at", { ascending: false }),
+    db.from("ecs_transfers").select("id,transfer_number,lot_id,client_id,source_warehouse_id,destination_warehouse_id,sent_kg,sent_bags,received_kg,vehicle_plate,status,sent_at,received_at,variance_approved_by,prepared_by,transfer_reference,driver_name,seal_number,expected_arrival_on,departure_document_reference,destination_document_reference").order("sent_at", { ascending: false }),
     db.from("warehouses").select("id,code,name,location,active").eq("active", true).order("name"),
     db.from("clients").select("id,code,legal_name,tin,phone,email,active").order("legal_name"),
-    db.from("coffee_lots").select("id,lot_number,receipt_id,warehouse_id,client_id,coffee_type,bag_count,quantity_kg,section,status").order("lot_number"),
+    db.from("coffee_lots").select("id,lot_number,receipt_id,warehouse_id,client_id,coffee_type,bag_count,quantity_kg,section,status,certification_status,certification_schemes,certificate_number,certification_issuer,certification_valid_from,certification_valid_to").order("lot_number"),
     db.from("authorized_representatives").select("id,client_id,full_name,identity_number,phone,valid_from,valid_to,active").order("full_name"),
     db.from("profiles").select("id,full_name,role,active").order("full_name"),
     db.from("agreements").select("id,client_id,agreement_number,effective_from,effective_to,status"),
@@ -573,23 +628,29 @@ export async function updateDispatchReadiness(id: string, documentReference: str
   return data as { id: string; dispatch_number: string };
 }
 
-export async function postEcxTransfer(lotId: string, destinationWarehouseId: string, sentKg: number, vehiclePlate: string) {
-  const { data, error } = await createSupabaseClient().rpc("post_ecs_transfer", {
-    p_lot_id: lotId,
-    p_destination_warehouse_id: destinationWarehouseId,
-    p_sent_kg: sentKg,
-    p_vehicle_plate: vehiclePlate || null,
+export async function postEcxTransfer(input: { lotId: string; destinationWarehouseId: string; sentKg: number; vehiclePlate: string; transferReference: string; driverName: string; sealNumber: string; expectedArrivalOn: string; departureDocumentReference: string }) {
+  const { data, error } = await createSupabaseClient().rpc("post_ecx_transfer_v2", {
+    p_lot_id: input.lotId,
+    p_destination_warehouse_id: input.destinationWarehouseId,
+    p_sent_kg: input.sentKg,
+    p_vehicle_plate: input.vehiclePlate || null,
+    p_transfer_reference: input.transferReference || null,
+    p_driver_name: input.driverName || null,
+    p_seal_number: input.sealNumber || null,
+    p_expected_arrival_on: input.expectedArrivalOn || null,
+    p_departure_document_reference: input.departureDocumentReference || null,
   });
   if (error) throw new Error(friendlyDatabaseError(error, "The ECX transfer could not be sent."));
   return data as string;
 }
 
-export async function receiveEcxTransfer(transferId: string, receivedKg: number, destinationSection: string, varianceApprovedBy: string | null) {
-  const { data, error } = await createSupabaseClient().rpc("receive_ecs_transfer", {
-    p_transfer_id: transferId,
-    p_received_kg: receivedKg,
-    p_destination_section: destinationSection,
-    p_variance_approved_by: varianceApprovedBy,
+export async function receiveEcxTransfer(input: { transferId: string; receivedKg: number; destinationSection: string; varianceApprovedBy: string | null; destinationDocumentReference: string }) {
+  const { data, error } = await createSupabaseClient().rpc("receive_ecx_transfer_v2", {
+    p_transfer_id: input.transferId,
+    p_received_kg: input.receivedKg,
+    p_destination_section: input.destinationSection,
+    p_variance_approved_by: input.varianceApprovedBy,
+    p_destination_document_reference: input.destinationDocumentReference || null,
   });
   if (error) throw new Error(friendlyDatabaseError(error, "The ECX destination receipt could not be posted."));
   return data as string;
@@ -597,7 +658,7 @@ export async function receiveEcxTransfer(transferId: string, receivedKg: number,
 
 export type InvoiceRow = { id: string; invoice_number: string; client_id: string; tariff_version: string; subtotal_etb: number; tax_etb: number; total_etb: number; status: string; issued_on: string | null; due_on: string | null; line_snapshot: { description: string; quantity: number; rate_etb: number }[] };
 export type PaymentRow = { id: string; payment_number: string; invoice_id: string; client_id: string; amount_etb: number; bank_reference: string; paid_at: string; direction: string; payment_method: string; payer_name: string | null; financial_institution: string | null; payment_note: string | null };
-export type ServiceEventRow = { id: string; client_id: string; service_type: string; description: string; quantity: number; unit_price: number; total_amount: number; reference_id: string; invoice_id: string | null; status: string; created_at: string };
+export type ServiceEventRow = { id: string; client_id: string; service_type: string; description: string; quantity: number; unit_price: number; total_amount: number; reference_id: string | null; reference_type: string | null; service_date: string; unit_label: string; invoice_id: string | null; status: string; created_at: string };
 export type TariffLineItemRow = { id: string; tariff_version_id: string; category: string; age_start_days: number; age_end_days: number | null; daily_rate_per_unit: number; certified: boolean };
 export type StorageQuoteRow = { date: string; openingBags: number; movementBags: number; closingBags: number; ageDay: number; rate: number; units: number; amount: number; references: string[] };
 export type StorageQuote = { tariffVersion: string; duplicateKey: string; billableBagDays: number; amount: number; rows: StorageQuoteRow[] };
@@ -619,13 +680,13 @@ export async function loadFinanceData(): Promise<FinanceData> {
     db.from("invoices").select("id,invoice_number,client_id,tariff_version,subtotal_etb,tax_etb,total_etb,status,issued_on,due_on,line_snapshot").order("created_at", { ascending: false }),
     db.from("payments").select("id,payment_number,invoice_id,client_id,amount_etb,bank_reference,paid_at,direction,payment_method,payer_name,financial_institution,payment_note").order("paid_at", { ascending: false }),
     db.from("clients").select("id,code,legal_name,tin,phone,email,active").order("legal_name"),
-    db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,bag_count,quantity_kg,section,status").order("lot_number"),
+    db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,bag_count,quantity_kg,section,status,certification_status,certification_schemes,certificate_number,certification_issuer,certification_valid_from,certification_valid_to").order("lot_number"),
     db.from("warehouse_receipts").select("id,arrival_at"),
     db.from("stock_movements").select("lot_id,bag_delta,occurred_at,reference_type").order("occurred_at"),
     db.from("tariff_versions").select("id,version_code,description,effective_from,effective_to,active,verified_by_1,verified_by_2").order("effective_from", { ascending: false }),
     db.from("tariff_line_items").select("id,tariff_version_id,category,age_start_days,age_end_days,daily_rate_per_unit,certified").order("category").order("age_start_days"),
     db.from("storage_billing_runs").select("id,duplicate_key,client_id,lot_id,run_number,total_amount,status").order("created_at", { ascending: false }),
-    db.from("service_events").select("id,client_id,service_type,description,quantity,unit_price,total_amount,reference_id,invoice_id,status,created_at").order("created_at", { ascending: false }),
+    db.from("service_events").select("id,client_id,service_type,description,quantity,unit_price,total_amount,reference_id,reference_type,service_date,unit_label,invoice_id,status,created_at").order("created_at", { ascending: false }),
   ]);
   const receiptDates = new Map((receiptResult.data ?? []).map((item) => [item.id, item.arrival_at]));
   return {
@@ -961,6 +1022,7 @@ export async function updateProfile(id: string, role: string, active: boolean) {
 }
 
 export type WarehouseControlData = {
+  currentUserId: string;
   clients: ClientRow[];
   lots: LotRow[];
   profiles: ProfileRow[];
@@ -970,11 +1032,13 @@ export type WarehouseControlData = {
   labourSettings: { id: string; fixed_addition_etb: number; effective_from: string; effective_to: string | null; active: boolean }[];
   labourRecords: { id: string; labour_number: string; work_date: string; client_id: string; lot_id: string | null; processing_order_id: string | null; dispatch_id: string | null; activity: string; quantity: number; unit_label: string; internal_cost_etb: number; charge_addition_etb: number; client_charge_etb: number; note: string | null; external_reference: string | null; service_event_id: string | null; created_at: string }[];
   storageLosses: { id: string; lot_id: string; measured_balance_kg: number; loss_kg: number; loss_percent: number; status: string; created_at: string }[];
+  manualServices: { id: string; service_number: string; client_id: string; processing_order_id: string | null; service_code: string; service_date: string; description: string; quantity: number; unit_label: string; unit_price: number; total_amount: number; approved_by: string; evidence_reference: string | null; note: string | null; service_event_id: string; created_at: string }[];
 };
 
 export async function loadWarehouseControlData(): Promise<WarehouseControlData> {
   const db = createSupabaseClient();
-  const [clients, lots, profiles, processingOrders, bagOrders, generatorRequests, labourSettings, labourRecords, storageLosses] = await Promise.all([
+  const userId = await currentUserId();
+  const [clients, lots, profiles, processingOrders, bagOrders, generatorRequests, labourSettings, labourRecords, storageLosses, manualServices] = await Promise.all([
     db.from("clients").select("id,code,legal_name,tin,active").order("legal_name"),
     db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,bag_count,quantity_kg,section,status").order("lot_number"),
     db.from("profiles").select("id,full_name,role,active").order("full_name"),
@@ -984,8 +1048,10 @@ export async function loadWarehouseControlData(): Promise<WarehouseControlData> 
     db.from("labour_charge_settings").select("id,fixed_addition_etb,effective_from,effective_to,active").order("effective_from", { ascending: false }),
     db.from("labour_records").select("id,labour_number,work_date,client_id,lot_id,processing_order_id,dispatch_id,activity,quantity,unit_label,internal_cost_etb,charge_addition_etb,client_charge_etb,note,external_reference,service_event_id,created_at").order("created_at", { ascending: false }),
     db.from("storage_losses").select("id,lot_id,measured_balance_kg,loss_kg,loss_percent,status,created_at").order("created_at", { ascending: false }),
+    db.from("manual_service_records").select("id,service_number,client_id,processing_order_id,service_code,service_date,description,quantity,unit_label,unit_price,total_amount,approved_by,evidence_reference,note,service_event_id,created_at").order("created_at", { ascending: false }),
   ]);
   return {
+    currentUserId: userId,
     clients: result(clients.data as ClientRow[] | null, clients.error),
     lots: result(lots.data as LotRow[] | null, lots.error),
     profiles: result(profiles.data as ProfileRow[] | null, profiles.error),
@@ -995,7 +1061,38 @@ export async function loadWarehouseControlData(): Promise<WarehouseControlData> 
     labourSettings: result(labourSettings.data as WarehouseControlData["labourSettings"] | null, labourSettings.error),
     labourRecords: result(labourRecords.data as WarehouseControlData["labourRecords"] | null, labourRecords.error),
     storageLosses: result(storageLosses.data as WarehouseControlData["storageLosses"] | null, storageLosses.error),
+    manualServices: result(manualServices.data as WarehouseControlData["manualServices"] | null, manualServices.error),
   };
+}
+
+export async function postManualService(input: {
+  clientId: string;
+  serviceCode: string;
+  serviceDate: string;
+  description: string;
+  quantity: number;
+  unitLabel: string;
+  unitPrice: number;
+  approvedBy: string;
+  processingOrderId?: string | null;
+  evidenceReference?: string;
+  note?: string;
+}) {
+  const { data, error } = await createSupabaseClient().rpc("post_manual_service_record", {
+    p_client_id: input.clientId,
+    p_service_code: input.serviceCode,
+    p_service_date: input.serviceDate,
+    p_description: input.description,
+    p_quantity: input.quantity,
+    p_unit_label: input.unitLabel,
+    p_unit_price: input.unitPrice,
+    p_approved_by: input.approvedBy,
+    p_processing_order_id: input.processingOrderId ?? null,
+    p_evidence_reference: input.evidenceReference?.trim() || null,
+    p_note: input.note?.trim() || null,
+  });
+  if (error) throw new Error(friendlyDatabaseError(error, "The service could not be recorded."));
+  return data as { id: string; service_number: string; service_event_id: string; total_amount: number };
 }
 
 export async function postLabourEntry(input: {

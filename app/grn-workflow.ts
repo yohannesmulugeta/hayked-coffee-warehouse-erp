@@ -1,4 +1,5 @@
 export type ReceiptStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "POSTED" | "REVERSED";
+export type CertificationStatus = "NOT_RECORDED" | "NOT_CERTIFIED" | "PENDING_VERIFICATION" | "VERIFIED";
 
 export type WarehouseReceipt = {
   databaseId?: string;
@@ -27,6 +28,12 @@ export type WarehouseReceipt = {
   netWeightKg: number;
   moisturePercent: number;
   wetCoffee: boolean;
+  certificationStatus?: CertificationStatus;
+  certificationSchemes?: string[];
+  certificateNumber?: string;
+  certificationIssuer?: string;
+  certificationValidFrom?: string;
+  certificationValidTo?: string;
   receivedBy: string;
   createdBy: string;
   status: ReceiptStatus;
@@ -46,6 +53,12 @@ export type CoffeeLot = {
   status: "ARRIVAL_IN_STORAGE" | "WAITING_PROCESSING" | "IN_PROCESS" | "PROCESSED" | "AWAITING_DISPATCH" | "IN_TRANSIT" | "DISPATCHED" | "CLOSED" | "REVERSED";
   lotCategory?: "ARRIVAL" | "CLIENT_REJECT" | "ACCEPTED_PROCESSED" | "HAYKED_BYPRODUCT" | "OTHER" | null;
   ownershipType?: "CLIENT" | "HAYKED";
+  certificationStatus?: CertificationStatus;
+  certificationSchemes?: string[];
+  certificateNumber?: string;
+  certificationIssuer?: string;
+  certificationValidFrom?: string;
+  certificationValidTo?: string;
 };
 
 export type StockMovement = {
@@ -56,6 +69,8 @@ export type StockMovement = {
   type: "RECEIPT" | "PROCESS_INPUT" | "PROCESS_OUTPUT" | "STORAGE_LOSS" | "DISPATCH" | "ECS_SEND" | "ECS_RECEIVE" | "OWNERSHIP_OUT" | "OWNERSHIP_IN" | "REVERSAL" | "ADJUSTMENT";
   bagsDelta: number;
   weightDeltaKg: number;
+  referenceType?: string;
+  referenceId?: string;
 };
 
 const nextStatus: Partial<Record<ReceiptStatus, ReceiptStatus>> = {
@@ -106,6 +121,8 @@ export function postReceipt(receipt: WarehouseReceipt, lotNumber: string, existi
     type: "RECEIPT",
     bagsDelta: receipt.bags,
     weightDeltaKg: receipt.netWeightKg,
+    referenceType: "WAREHOUSE_RECEIPT",
+    referenceId: receipt.databaseId,
   };
   return { receipt: { ...receipt, status: "POSTED" as const, lotNumber }, lot, movement };
 }
