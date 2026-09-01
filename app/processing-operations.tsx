@@ -16,7 +16,6 @@ import {
   Send,
   ShieldCheck,
   Trash2,
-  ThumbsDown,
   ThumbsUp,
   X,
 } from "lucide-react";
@@ -31,21 +30,24 @@ import {
   type ProcessingOutputLine,
   type ProcessingRequest,
   type ProcessingRequestLine,
-  type ProcessingRequestStatus,
 } from "./processing-workflow";
 import {
+  approveProcessingRequest,
   completeProcessingOrder,
   createProcessingRequest,
   listEligibleProcessingLots,
   loadProcessingData,
-  processingRpc,
+  queueApprovedProcessingRequest,
+  rejectProcessingRequest,
   saveEcxCheck,
   startProcessingOrder,
+  submitProcessingRequest,
   type EcxCheckRow,
   type ProcessingData,
   type EligibleProcessingLot,
 } from "@/lib/erp-data";
 import type { ProcessingStateFilter } from "./ux-rules";
+import { canPerformProcessingAction, normalizeAppRole } from "./role-permissions";
 import {
   DetailGrid,
   EvidenceUploader,
@@ -642,20 +644,41 @@ function ProcessingOrderDetail({
   );
 }
 
-function EcxCheckDrawer({
+function ProcessingRequestDetail({
   request,
   check,
+  canDecide,
+  decisionBlockedReason,
+  onDecision,
   onSaved,
   onClose,
 }: {
   request: ProcessingRequest;
   check?: EcxCheckRow;
+  canDecide: boolean;
+  decisionBlockedReason: string;
+  onDecision: (decision: "APPROVED" | "REJECTED") => Promise<void>;
   onSaved: (message: string) => Promise<void>;
   onClose: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [decisionBusy, setDecisionBusy] = useState(false);
+  const [decisionError, setDecisionError] = useState("");
   const [error, setError] = useState("");
   const [savedCheck, setSavedCheck] = useState(check);
+  async function decide(decision: "APPROVED" | "REJECTED") {
+    setDecisionBusy(true);
+    setDecisionError("");
+    try {
+      await onDecision(decision);
+    } catch (caught) {
+      setDecisionError(
+        caught instanceof Error ? caught.message : "The approval decision failed.",
+      );
+    } finally {
+      setDecisionBusy(false);
+    }
+  }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -688,95 +711,60 @@ function EcxCheckDrawer({
   return (
     <RecordDetailDrawer
       open
-      eyebrow="ECX CHECK"
-      title={savedCheck?.check_number ?? "New ECX check"}
-      subtitle={`${request.requestNumber} · ${request.client}`}
-      status={<Status value={savedCheck?.result ?? "PENDING"} />}
+      eyebrow="PROCESSING REQUEST"
+      title={request.requestNumber ?? request.id}
+      subtitle={`${request.client} · Paper note ${request.noteNumber}`}
+      status={<Status value={request.status} />}
       onClose={onClose}
     >
       <DetailGrid
         items={[
-          { label: "Processing request", value: request.requestNumber },
-          { label: "Paper note", value: request.noteNumber },
+          { label: "Request date", value: request.requestDate },
           { label: "Coffee lot", value: request.lot },
           {
             label: "Quantity",
-            value: `${request.requestedKg.toLocaleString()} kg`,
+            value: `${request.requestedKg.toLocaleString()} kg / ${request.requestedBags} bags`,
           },
+          { label: "Preparation", value: request.preparationType },
+          { label: "Requested by", value: request.requester },
+          { label: "Approver", value: request.approver },
         ]}
       />
-      <form className="drawer-form" onSubmit={submit}>
-        <label>
-          Check date
-          <input
-            name="checkedOn"
-            type="date"
-            required
-            defaultValue={
-              savedCheck?.checked_on ?? new Date().toISOString().slice(0, 10)
-            }
-          />
-        </label>
-        <label>
-          Result
-          <select name="result" defaultValue={savedCheck?.result ?? "PENDING"}>
-            <option value="PENDING">Pending</option>
-            <option value="PASSED">Passed</option>
-            <option value="FAILED">Failed</option>
-            <option value="NOT_REQUIRED">Not required</option>
-          </select>
-        </label>
-        <label>
-          ECX reference
-          <input
-            name="referenceNumber"
-            defaultValue={savedCheck?.reference_number ?? ""}
-            placeholder="ECX reference or certificate"
-          />
-        </label>
-        <label>
-          Inspector / checker
-          <input
-            name="inspectorName"
-            defaultValue={savedCheck?.inspector_name ?? ""}
-          />
-        </label>
-        <label className="wide">
-          Notes
-          <textarea
-            name="notes"
-            rows={3}
-            defaultValue={savedCheck?.notes ?? ""}
-          />
-        </label>
-        {error && (
-          <p className="request-form-error wide" role="alert">
-            {error}
-          </p>
-        )}
-        <button className="primary-button wide" type="submit" disabled={busy}>
-          <FileCheck2 size={16} />
-          {busy
-            ? "Saving check..."
-            : savedCheck
-              ? "Update ECX check"
-              : "Save ECX check"}
-        </button>
-      </form>
-      <EvidenceUploader
-        reference={
-          savedCheck
-            ? {
-                type: "ECX_CHECK",
-                id: savedCheck.id,
-                label: savedCheck.check_number,
-              }
-            : undefined
-        }
-        documentType="ECX_CHECK_EVIDENCE"
-        label="ECX certificate or evidence"
-        help="Add the PDF, photo, or scanned certificate after saving the check."
-      />
+      {request.notes && <p className="drawer-explainer">{request.notes}</p>}
+      {request.status === "SUBMITTED" && (
+        <section className="processing-request-decision">
+          <div>
+            <strong>Waiting for approval</strong>
+            <small>Review the request and optional attachments before deciding.</small>
+          </div>
+          {canDecide ? (
+            <div className="processing-decision-actions">
+              <button
+                className="secondary-button reject"
+                type="button"
+                disabled={decisionBusy}
+                onClick={() => void decide("REJECTED")}
+              >
+                Reject Request
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={decisionBusy}
+                onClick={() => void decide("APPROVED")}
+              >
+                <ThumbsUp size={16} />
+                Approve Request
+              </button>
+            </div>
+          ) : (
+            <span className="muted-action">{decisionBlockedReason}</span>
+          )}
+          {decisionError && (
+            <p className="request-form-error" role="alert">{decisionError}</p>
+          )}
+        </section>
+      )}
       <EvidenceUploader
         reference={{
           type: "PROCESSING_REQUEST",
@@ -784,17 +772,83 @@ function EcxCheckDrawer({
           label: request.requestNumber ?? request.id,
         }}
         documentType="PROCESSING_REQUEST"
-        label="Processing request document"
-        help="Attach the client's signed request, paper note, or supporting photo."
+        label="Optional request attachment"
+        help="Attachments are optional. Add a signed request, paper note, PDF, or photo when available."
       />
+      <details className="optional-ecx-section">
+        <summary>
+          <span>
+            <strong>Optional ECX information</strong>
+            <small>ECX does not block approval or processing.</small>
+          </span>
+          {savedCheck && <Status value={savedCheck.result} />}
+        </summary>
+        <form className="drawer-form" onSubmit={submit}>
+          <label>
+            Check date
+            <input
+              name="checkedOn"
+              type="date"
+              required
+              defaultValue={
+                savedCheck?.checked_on ?? new Date().toISOString().slice(0, 10)
+              }
+            />
+          </label>
+          <label>
+            Result
+            <select name="result" defaultValue={savedCheck?.result ?? "PENDING"}>
+              <option value="PENDING">Pending</option>
+              <option value="PASSED">Passed</option>
+              <option value="FAILED">Failed</option>
+              <option value="NOT_REQUIRED">Not required</option>
+            </select>
+          </label>
+          <label>
+            ECX reference
+            <input
+              name="referenceNumber"
+              defaultValue={savedCheck?.reference_number ?? ""}
+              placeholder="ECX reference or certificate"
+            />
+          </label>
+          <label>
+            Inspector / checker
+            <input name="inspectorName" defaultValue={savedCheck?.inspector_name ?? ""} />
+          </label>
+          <label className="wide">
+            Notes
+            <textarea name="notes" rows={3} defaultValue={savedCheck?.notes ?? ""} />
+          </label>
+          {error && <p className="request-form-error wide" role="alert">{error}</p>}
+          <button className="secondary-button wide" type="submit" disabled={busy}>
+            <FileCheck2 size={16} />
+            {busy ? "Saving..." : savedCheck ? "Update optional ECX" : "Save optional ECX"}
+          </button>
+        </form>
+        <EvidenceUploader
+          reference={
+            savedCheck
+              ? { type: "ECX_CHECK", id: savedCheck.id, label: savedCheck.check_number }
+              : undefined
+          }
+          documentType="ECX_CHECK_EVIDENCE"
+          label="Optional ECX attachment"
+          help="Add supporting ECX evidence only when it exists."
+        />
+      </details>
     </RecordDetailDrawer>
   );
 }
 
 export function ProcessingOperations({
   initialState = "All",
+  role = "viewer",
+  userId = "",
 }: {
   initialState?: ProcessingStateFilter;
+  role?: string;
+  userId?: string;
 }) {
   const [tab, setTab] = useState<Tab>("Requests");
   const [stateFilter, setStateFilter] =
@@ -810,12 +864,17 @@ export function ProcessingOperations({
   const [editingInputKey, setEditingInputKey] = useState<number | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [detailOrderId, setDetailOrderId] = useState("");
-  const [ecxRequestId, setEcxRequestId] = useState("");
+  const [requestDetailId, setRequestDetailId] = useState("");
   const [outputLines, setOutputLines] = useState<ProcessingOutputLine[]>([]);
   const [exceptionApproved, setExceptionApproved] = useState(false);
   const [evidencePath, setEvidencePath] = useState("");
   const [message, setMessage] = useState("");
   const [databaseError, setDatabaseError] = useState("");
+  const canCreate = canPerformProcessingAction(role, "create");
+  const canApprove = canPerformProcessingAction(role, "approve");
+  const canQueue = canPerformProcessingAction(role, "queue");
+  const canStart = canPerformProcessingAction(role, "start");
+  const canComplete = canPerformProcessingAction(role, "complete");
 
   const clients = useMemo(() => data?.clients ?? [], [data?.clients]);
   const lots = useMemo(() => data?.lots ?? [], [data?.lots]);
@@ -1041,8 +1100,9 @@ export function ProcessingOperations({
       setRequestFormOpen(false);
       setSelectedClientId("");
       setRequestLines([]);
+      setStateFilter("Waiting Approval");
       setMessage(
-        `${requestNumber} saved with ${lines.length} traceable input lot${lines.length === 1 ? "" : "s"}.`,
+        `${requestNumber} submitted for approval with ${lines.length} traceable input lot${lines.length === 1 ? "" : "s"}.`,
       );
     } catch (error) {
       setRequestError(
@@ -1053,14 +1113,11 @@ export function ProcessingOperations({
     }
   }
 
-  async function changeRequestStatus(
-    id: string,
-    status: ProcessingRequestStatus,
-  ) {
+  async function submitRequest(id: string) {
     try {
-      await processingRpc("transition_processing_request", id, status);
+      await submitProcessingRequest(id);
       await reload();
-      setMessage(`Request moved to ${status.toLowerCase()}.`);
+      setMessage("Request submitted for approval.");
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -1072,7 +1129,7 @@ export function ProcessingOperations({
 
   async function addRequestToQueue(request: ProcessingRequest) {
     try {
-      await processingRpc("queue_processing_request", request.id);
+      await queueApprovedProcessingRequest(request.id);
       await reload();
       setTab("Requests");
       setStateFilter("Ready to Start");
@@ -1082,6 +1139,25 @@ export function ProcessingOperations({
         error instanceof Error ? error.message : "Request could not be queued.",
       );
     }
+  }
+
+  async function decideRequest(
+    request: ProcessingRequest,
+    decision: "APPROVED" | "REJECTED",
+  ) {
+    if (decision === "APPROVED") {
+      await approveProcessingRequest(request.id);
+    } else {
+      await rejectProcessingRequest(request.id);
+    }
+    await reload();
+    setRequestDetailId("");
+    setStateFilter(decision === "APPROVED" ? "Ready to Start" : "Rejected");
+    setMessage(
+      decision === "APPROVED"
+        ? `${request.requestNumber} approved and ready to start.`
+        : `${request.requestNumber} rejected.`,
+    );
   }
 
   function openIntake(item: QueueItem) {
@@ -1224,7 +1300,7 @@ export function ProcessingOperations({
         state: (request.status === "APPROVED"
           ? "Ready to Start"
           : request.status === "REJECTED"
-            ? "Completed"
+            ? "Rejected"
             : "Waiting Approval") as ProcessingStateFilter,
         statusLabel:
           request.status === "DRAFT"
@@ -1333,20 +1409,22 @@ export function ProcessingOperations({
               Unwashed / UG<strong>2.5%</strong>
             </span>
           </div>
-          <button
-            className="primary-button"
-            type="button"
-            onClick={() => {
-              setRequestError("");
-              setSelectedClientId("");
-              setRequestLines([]);
-              setProcessingPurpose("Export preparation");
-              setRequestFormOpen(true);
-            }}
-          >
-            <Plus size={16} />
-            New Processing Request
-          </button>
+          {canCreate && (
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => {
+                setRequestError("");
+                setSelectedClientId("");
+                setRequestLines([]);
+                setProcessingPurpose("Export preparation");
+                setRequestFormOpen(true);
+              }}
+            >
+              <Plus size={16} />
+              Add Processing Request
+            </button>
+          )}
         </div>
       </section>
       {message && (
@@ -1363,12 +1441,12 @@ export function ProcessingOperations({
         steps={[
           {
             label: "Request",
-            help: "Record request, ECX check, and evidence",
+            help: "Add the request and optional attachments",
             state: tab === "Requests" ? "current" : "done",
           },
           {
             label: "Approve",
-            help: "Independent approval and reservation",
+            help: "Review, approve, and reserve the input lots",
             state:
               tab === "Queue"
                 ? "current"
@@ -1426,6 +1504,7 @@ export function ProcessingOperations({
                   "Ready to Start",
                   "In Progress",
                   "Completed",
+                  "Rejected",
                 ] as ProcessingStateFilter[]
               ).map((state) => (
                 <button
@@ -1474,15 +1553,22 @@ export function ProcessingOperations({
                 <span>Next Action</span>
               </div>
               {visibleWorkflowRows.map((item) => {
-                const ecx = data?.ecxChecks.find(
-                  (check) => check.processing_request_id === item.requestId,
-                );
-                const ecxReady =
-                  ecx?.result === "PASSED" || ecx?.result === "NOT_REQUIRED";
+                const openDetails = () => {
+                  if (item.request) setRequestDetailId(item.request.id);
+                  else if (item.queueItem) setDetailOrderId(item.queueItem.databaseId);
+                  else if (item.order) setDetailOrderId(item.order.databaseId);
+                };
                 return (
-                  <div key={item.key}>
+                  <div className="processing-workflow-row" key={item.key} onClick={openDetails}>
                     <span>
-                      <strong className="reference">{item.reference}</strong>
+                      <button
+                        className="workflow-reference"
+                        type="button"
+                        aria-label={`Open ${item.reference} details`}
+                        onClick={openDetails}
+                      >
+                        {item.reference}
+                      </button>
                       {item.request && (
                         <small>Paper note {item.request.noteNumber}</small>
                       )}
@@ -1494,118 +1580,107 @@ export function ProcessingOperations({
                     <span>{item.quantityKg.toLocaleString()} kg</span>
                     <span>
                       <Status value={item.statusLabel} />
-                      {item.requestId && (
-                        <small>
-                          ECX:{" "}
-                          {ecx?.result.replaceAll("_", " ") ??
-                            (item.order?.status === "COMPLETED"
-                              ? "Historical check missing"
-                              : "Action required")}
-                        </small>
-                      )}
                     </span>
                     <span className="request-actions">
-                      {item.requestId && (
+                      {item.request?.status === "DRAFT" && canCreate && (
                         <button
-                          className="table-action"
+                          className="workflow-primary-action"
                           type="button"
-                          onClick={() => setEcxRequestId(item.requestId)}
-                        >
-                          <FileCheck2 size={13} />
-                          Request & ECX
-                        </button>
-                      )}
-                      {item.request?.status === "DRAFT" && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            changeRequestStatus(item.request!.id, "SUBMITTED")
-                          }
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void submitRequest(item.request!.id);
+                          }}
                         >
                           <Send size={13} />
-                          Submit request
+                          Submit for Approval
                         </button>
                       )}
                       {item.request?.status === "SUBMITTED" && (
-                        <>
+                        canApprove ? (
                           <button
-                            className={!ecxReady ? "ecx-action" : ""}
+                            className="workflow-primary-action"
                             type="button"
-                            onClick={() => ecxReady ? changeRequestStatus(item.request!.id, "APPROVED") : setEcxRequestId(item.requestId)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setRequestDetailId(item.request!.id);
+                            }}
                           >
-                            {ecxReady ? <ThumbsUp size={13} /> : <FileCheck2 size={13} />}
-                            {ecxReady ? "Approve request" : "Complete ECX check"}
+                            Review Request <ArrowRight size={13} />
                           </button>
-                          <button
-                            className="reject"
-                            type="button"
-                            aria-label={`Reject ${item.request.requestNumber}`}
-                            onClick={() =>
-                              changeRequestStatus(item.request!.id, "REJECTED")
-                            }
-                          >
-                            <ThumbsDown size={13} />
-                          </button>
-                        </>
+                        ) : (
+                          <span className="muted-action">Waiting for approval</span>
+                        )
                       )}
-                      {item.request?.status === "APPROVED" && (
+                      {item.request?.status === "APPROVED" && canQueue && (
                         <button
+                          className="workflow-primary-action"
                           type="button"
-                          onClick={() => addRequestToQueue(item.request!)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void addRequestToQueue(item.request!);
+                          }}
                         >
-                          Queue for processing <ArrowRight size={13} />
+                          Prepare to Start <ArrowRight size={13} />
                         </button>
                       )}
                       {item.request?.status === "REJECTED" && (
-                        <span className="muted-action">No further action</span>
+                        <button
+                          className="workflow-secondary-action"
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setRequestDetailId(item.request!.id);
+                          }}
+                        >
+                          View Summary
+                        </button>
                       )}
                       {item.queueItem && (
-                        <>
+                        canStart ? (
                           <button
-                            className="table-action"
-                            type="button"
-                            onClick={() =>
-                              setDetailOrderId(item.queueItem!.databaseId)
-                            }
-                          >
-                            Order & files
-                          </button>
-                          <button
-                            className="table-action"
+                            className="workflow-primary-action"
                             type="button"
                             disabled={item.queueItem.readiness === "BLOCKED"}
-                            onClick={() => openIntake(item.queueItem!)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openIntake(item.queueItem!);
+                            }}
                           >
                             {item.queueItem.readiness === "BLOCKED"
-                              ? "Review reservations"
+                              ? "Resolve Reservations"
                               : "Start Processing"}
                             <ArrowRight size={13} />
                           </button>
-                        </>
+                        ) : (
+                          <span className="muted-action">Ready for processing</span>
+                        )
                       )}
                       {item.order && (
-                        <>
+                        item.order.status === "IN_PROCESS" && canComplete ? (
                           <button
-                            className="table-action"
+                            className="workflow-primary-action"
                             type="button"
-                            onClick={() =>
-                              setDetailOrderId(item.order!.databaseId)
-                            }
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openCompletion(item.order!);
+                            }}
                           >
-                            Order & files
+                            Complete Processing <ArrowRight size={13} />
                           </button>
-                          {item.order.status === "IN_PROCESS" ? (
-                            <button
-                              className="table-action"
-                              type="button"
-                              onClick={() => openCompletion(item.order!)}
-                            >
-                              Complete Processing <ArrowRight size={13} />
-                            </button>
-                          ) : (
-                            <span className="muted-action">Locked</span>
-                          )}
-                        </>
+                        ) : item.order.status === "COMPLETED" ? (
+                          <button
+                            className="workflow-secondary-action"
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setDetailOrderId(item.order!.databaseId);
+                            }}
+                          >
+                            View Summary
+                          </button>
+                        ) : (
+                          <span className="muted-action">Processing in progress</span>
+                        )
                       )}
                     </span>
                   </div>
@@ -1864,8 +1939,9 @@ export function ProcessingOperations({
                 <div className="wide upload-after-save-note">
                   <FileCheck2 size={17} />
                   <span>
-                    <strong>Save first, then attach the request file.</strong>{" "}
-                    Use “Request & ECX” on the saved request to upload its signed PDF, scan, or photo. ECX checking is recorded in the same detail view but remains a separate control.
+                    <strong>Attachments are optional.</strong> Submit the request
+                    now, then click its reference in the table whenever you want
+                    to add a signed PDF, scan, or photo.
                   </span>
                 </div>
               </div>
@@ -1890,7 +1966,7 @@ export function ProcessingOperations({
                 disabled={!selectedClientId || requestLines.length === 0}
               >
                 <FileCheck2 size={16} />
-                Save draft
+                Submit for Approval
               </button>
             </footer>
           </form>
@@ -2582,22 +2658,33 @@ export function ProcessingOperations({
         />
       )}
       {data &&
-        ecxRequestId &&
+        requestDetailId &&
         (() => {
           const request = data.requests.find(
-            (item) => item.id === ecxRequestId,
+            (item) => item.id === requestDetailId,
           );
           return request ? (
-            <EcxCheckDrawer
+            <ProcessingRequestDetail
               request={request}
               check={data.ecxChecks.find(
-                (item) => item.processing_request_id === ecxRequestId,
+                (item) => item.processing_request_id === requestDetailId,
               )}
+              canDecide={
+                canApprove &&
+                (normalizeAppRole(role) === "system_admin" ||
+                  request.createdById !== userId)
+              }
+              decisionBlockedReason={
+                !canApprove
+                  ? "Your role can view this request, but cannot approve it."
+                  : "A second authorized employee must decide this request."
+              }
+              onDecision={(decision) => decideRequest(request, decision)}
               onSaved={async (nextMessage) => {
                 await reload();
                 setMessage(nextMessage);
               }}
-              onClose={() => setEcxRequestId("")}
+              onClose={() => setRequestDetailId("")}
             />
           ) : null;
         })()}

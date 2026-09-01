@@ -50,3 +50,15 @@ export function canAccessView(role: string, view: string) {
 export function canManageCoreMasterData(role: string) {
   return ["system_admin", "warehouse_manager"].includes(normalizeAppRole(role));
 }
+
+export type ProcessingAction = "create" | "approve" | "queue" | "start" | "complete";
+
+const processingActionAccess: Record<string, ReadonlySet<ProcessingAction>> = {
+  system_admin: new Set(["create", "approve", "queue", "start", "complete"]),
+  warehouse_manager: new Set(["create", "approve", "queue", "start", "complete"]),
+  processing_supervisor: new Set(["create", "approve", "queue", "start", "complete"]),
+};
+
+export function canPerformProcessingAction(role: string, action: ProcessingAction) {
+  return processingActionAccess[normalizeAppRole(role)]?.has(action) ?? false;
+}

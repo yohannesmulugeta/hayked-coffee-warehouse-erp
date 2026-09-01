@@ -6,6 +6,7 @@ export type ProcessingCertification = "Organic" | "RFA" | "C.A.F.E" | "Non-certi
 export type ProcessingRequest = {
   id: string;
   requestNumber?: string;
+  createdById?: string;
   clientDatabaseId?: string;
   lotDatabaseId?: string;
   receiptDatabaseId?: string;

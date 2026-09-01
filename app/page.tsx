@@ -33,7 +33,7 @@ import type { DashboardData, ReportType } from "@/lib/erp-data";
 import { greetingForHour, warehouseHour } from "@/lib/ui-format";
 import { notificationTarget, type ProcessingStateFilter, type StockStatusFilter, type StockTypeFilter } from "./ux-rules";
 import { canAccessView, canManageCoreMasterData } from "./role-permissions";
-import { coreViews, dispatchViews, financeViews, isImplementedView, managementViews, warehouseControlViews } from "./view-registry";
+import { dispatchViews, financeViews, isImplementedView, managementViews, warehouseControlViews } from "./view-registry";
 
 const CoreOperations = lazy(() => import("./core-operations").then((module) => ({ default: module.CoreOperations })));
 const ProcessingOperations = lazy(() => import("./processing-operations").then((module) => ({ default: module.ProcessingOperations })));
@@ -204,7 +204,7 @@ function Sidebar({ open, compact, activeView, pendingApprovals, databaseStatus, 
   );
 }
 
-type CurrentProfile = { full_name: string; role: string };
+type CurrentProfile = { id: string; full_name: string; role: string };
 
 function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: CurrentProfile }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -360,7 +360,7 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
               {filteredActivities.length ? filteredActivities.map((row, rowIndex) => <div role="row" key={`${row[0]}-${rowIndex}`}>{row.map((cell, index) => <span role="cell" key={`${cell}-${index}`} className={index === 0 ? "reference" : ""}>{cell}</span>)}</div>) : <p className="empty-result">No activity matches &quot;{query}&quot;.</p>}
             </div>
           </section>}
-        </div> : <Suspense fallback={<ModuleLoading label={viewLabels.get(activeView) ?? activeView} />}>{activeView === "Processing" ? <ProcessingOperations initialState={processingState} /> : warehouseControlViews.includes(activeView) ? <WarehouseControls activeView={activeView} onNavigate={navigate} /> : dispatchViews.includes(activeView) ? <DispatchOperations activeView={activeView} onNavigate={navigate} /> : financeViews.includes(activeView) ? <FinanceOperations /> : managementViews.includes(activeView) ? <ManagementOperations activeView={activeView} onNavigate={navigate} initialReportType={reportType} /> : <CoreOperations activeView={activeView} stockIntent={stockIntent} onNavigate={navigate} />}</Suspense>}
+        </div> : <Suspense fallback={<ModuleLoading label={viewLabels.get(activeView) ?? activeView} />}>{activeView === "Processing" ? <ProcessingOperations initialState={processingState} role={profile.role} userId={profile.id} /> : warehouseControlViews.includes(activeView) ? <WarehouseControls activeView={activeView} onNavigate={navigate} /> : dispatchViews.includes(activeView) ? <DispatchOperations activeView={activeView} onNavigate={navigate} /> : financeViews.includes(activeView) ? <FinanceOperations /> : managementViews.includes(activeView) ? <ManagementOperations activeView={activeView} onNavigate={navigate} initialReportType={reportType} /> : <CoreOperations activeView={activeView} stockIntent={stockIntent} onNavigate={navigate} />}</Suspense>}
       </section>
     </main>
   );
@@ -369,11 +369,11 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
 export default function Home() {
   const [signedIn, setSignedIn] = useState(false);
   const [checkingSession, setCheckingSession] = useState(supabaseConfigured);
-  const [profile, setProfile] = useState<CurrentProfile>({ full_name: supabaseConfigured ? "Signed-in user" : "Local user", role: "viewer" });
+  const [profile, setProfile] = useState<CurrentProfile>({ id: "", full_name: supabaseConfigured ? "Signed-in user" : "Local user", role: "viewer" });
 
   async function loadProfile(userId: string) {
     const { data } = await createSupabaseClient().from("profiles").select("full_name,role").eq("id", userId).maybeSingle();
-    if (data) setProfile(data);
+    if (data) setProfile({ id: userId, ...data });
   }
 
   useEffect(() => {
@@ -402,7 +402,7 @@ export default function Home() {
 
   async function signOut() {
     if (supabaseConfigured) await createSupabaseClient().auth.signOut();
-    setProfile({ full_name: supabaseConfigured ? "Signed-in user" : "Local user", role: "viewer" });
+    setProfile({ id: "", full_name: supabaseConfigured ? "Signed-in user" : "Local user", role: "viewer" });
     setSignedIn(false);
   }
 

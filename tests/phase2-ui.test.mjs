@@ -19,8 +19,13 @@ test("closed compact navigation is removed from keyboard and accessibility navig
   assert.match(pageSource, /inert=\{compactNavigation && sidebarOpen/);
 });
 
-test("processing request and order actions have distinct accessible names", () => {
-  assert.match(processingSource, /Request & ECX/);
-  assert.match(processingSource, /Order & files/);
-  assert.doesNotMatch(processingSource, />\s*Details & files\s*</);
+test("processing rows expose one clear next step and open details from the record", () => {
+  assert.match(processingSource, /Review Request/);
+  assert.match(processingSource, /Start Processing/);
+  assert.match(processingSource, /Complete Processing/);
+  assert.match(processingSource, /View Summary/);
+  assert.match(processingSource, /Open .* details/);
+  assert.doesNotMatch(processingSource, /Request & ECX/);
+  assert.doesNotMatch(processingSource, /Order & files/);
+  assert.doesNotMatch(processingSource, /muted-action">Locked/);
 });

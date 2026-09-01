@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  canAccessView,
-  canManageCoreMasterData,
-  normalizeAppRole,
-} from "../app/role-permissions.ts";
+import * as permissions from "../app/role-permissions.ts";
+
+const { canAccessView, canManageCoreMasterData, normalizeAppRole } = permissions;
 
 test("unknown roles fail closed as viewers", () => {
   assert.equal(normalizeAppRole("unexpected_role"), "viewer");
@@ -34,4 +32,12 @@ test("only system administrators and warehouse managers manage core master data"
   assert.equal(canManageCoreMasterData("warehouse_manager"), true);
   assert.equal(canManageCoreMasterData("finance_officer"), false);
   assert.equal(canManageCoreMasterData("viewer"), false);
+});
+
+test("processing actions are role-aware and system administrators can perform every step", () => {
+  assert.equal(typeof permissions.canPerformProcessingAction, "function");
+  for (const action of ["create", "approve", "queue", "start", "complete"]) {
+    assert.equal(permissions.canPerformProcessingAction("system_admin", action), true, action);
+    assert.equal(permissions.canPerformProcessingAction("warehouse_officer", action), false, action);
+  }
 });

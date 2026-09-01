@@ -2,7 +2,7 @@ import type { CoffeeLot } from "./grn-workflow";
 
 export type StockTypeFilter = "All" | "Arrival" | "Processed" | "Reject" | "Hayked Byproduct";
 export type StockStatusFilter = "All" | "Available" | "Waiting Processing" | "In Processing" | "Awaiting Dispatch" | "Reserved" | "Closed" | "Reversed";
-export type ProcessingStateFilter = "All" | "Waiting Approval" | "Ready to Start" | "In Progress" | "Completed";
+export type ProcessingStateFilter = "All" | "Waiting Approval" | "Ready to Start" | "In Progress" | "Completed" | "Rejected";
 
 export function lotTypeLabel(lot: Pick<CoffeeLot, "lotCategory" | "ownershipType" | "sourceGrn">): Exclude<StockTypeFilter, "All"> | "Other" {
   if (lot.lotCategory === "ARRIVAL") return "Arrival";

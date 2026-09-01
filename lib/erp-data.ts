@@ -449,7 +449,7 @@ type ProcessingRequestRow = {
   lot_reference: string; lot_id: string | null; coffee_type: "WASHED" | "UNWASHED_UG"; requested_preparation_type: string;
   grade: string; requested_bags: number; requested_kg: number; certifications: ProcessingRequest["certifications"];
   other_certification: string | null; requester_name: string; checker_name: string; approver_name: string; notes: string | null;
-  scanned_document_attached: boolean; status: ProcessingRequest["status"]; queued_order_id: string | null;
+  scanned_document_attached: boolean; status: ProcessingRequest["status"]; queued_order_id: string | null; created_by: string;
 };
 export type ProcessingRequestLineRow = { id: string; request_id: string; line_number: number; lot_id: string; requested_preparation_type: string; grade: string; requested_bags: number; requested_kg: number; certifications: ProcessingRequest["certifications"]; special_instruction: string | null; remark: string | null };
 export type ProcessingOrderInputRow = { id: string; order_id: string; request_line_id: string | null; lot_id: string; input_bags: number; input_kg: number };
@@ -511,7 +511,7 @@ export async function loadProcessingData(): Promise<ProcessingData> {
   const orderById = new Map(orders.map((item) => [item.id, item]));
   return {
     requests: rows.map((item) => ({
-      id: item.id, requestNumber: item.request_number, clientDatabaseId: item.client_id ?? undefined,
+      id: item.id, requestNumber: item.request_number, createdById: item.created_by, clientDatabaseId: item.client_id ?? undefined,
       lotDatabaseId: item.lot_id ?? undefined, noteNumber: item.request_note_number, requestDate: item.request_date, client: item.client_name,
       lot: item.lot_reference, coffeeType: item.coffee_type === "WASHED" ? "Washed" : "Unwashed / UG",
       preparationType: item.requested_preparation_type, grade: item.grade, requestedBags: item.requested_bags,
@@ -529,7 +529,7 @@ export async function createProcessingRequest(request: ProcessingRequest, lines:
   const db = createSupabaseClient();
   const client = await db.from("clients").select("id,legal_name").eq("id", request.clientDatabaseId).eq("active", true).maybeSingle();
   if (client.error || !client.data) throw new Error(friendlyDatabaseError(client.error, "The selected client is no longer available."));
-  const { data, error } = await db.rpc("create_processing_request", {
+  const { data, error } = await db.rpc("create_and_submit_processing_request", {
     p_header: { noteNumber: request.noteNumber, requestDate: request.requestDate, clientId: client.data.id, clientName: client.data.legal_name, certifications: request.certifications, otherCertification: request.otherCertification, requester: request.requester, checker: request.checker, approver: request.approver, notes: request.notes, scannedDocumentAttached: request.scannedDocumentAttached },
     p_lines: lines.map((line) => ({ lotId: line.lotDatabaseId, preparationType: line.preparationType, grade: line.grade, requestedBags: line.requestedBags, requestedKg: line.requestedKg, certifications: line.certifications, specialInstruction: line.specialInstruction, remark: line.remark })),
   });
@@ -537,9 +537,28 @@ export async function createProcessingRequest(request: ProcessingRequest, lines:
   return String((data as { request_number: string }).request_number);
 }
 
-export async function processingRpc(name: "transition_processing_request" | "queue_processing_request", id: string, targetStatus?: string) {
-  const parameters = name === "transition_processing_request" ? { request_id: id, target_status: targetStatus } : { request_id: id };
-  const { error } = await createSupabaseClient().rpc(name, parameters);
+async function processingRequestRpc(
+  name: "submit_processing_request" | "reject_processing_request" | "queue_approved_processing_request",
+  id: string,
+) {
+  const { error } = await createSupabaseClient().rpc(name, { request_id: id });
+  if (error) throw new Error(error.message);
+}
+
+export const submitProcessingRequest = (id: string) =>
+  processingRequestRpc("submit_processing_request", id);
+
+export const rejectProcessingRequest = (id: string) =>
+  processingRequestRpc("reject_processing_request", id);
+
+export const queueApprovedProcessingRequest = (id: string) =>
+  processingRequestRpc("queue_approved_processing_request", id);
+
+export async function approveProcessingRequest(id: string) {
+  const { error } = await createSupabaseClient().rpc(
+    "approve_and_queue_processing_request",
+    { request_id: id },
+  );
   if (error) throw new Error(error.message);
 }
 
