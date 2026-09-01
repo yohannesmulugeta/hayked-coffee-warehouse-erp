@@ -97,6 +97,5 @@ test("storage billing is tariff-authoritative and preserves daily calculation ro
   assert.match(sql, /revoke execute on function public\.calculate_and_save_storage_billing/i);
   assert.match(sql, /function public\.create_client_setup/i);
   assert.match(finance, /Show every day/);
-  assert.match(finance, /The database—not the browser—selects the rate/);
   assert.doesNotMatch(finance, /2\.75/);
 });

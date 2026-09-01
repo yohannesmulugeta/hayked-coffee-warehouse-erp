@@ -313,9 +313,6 @@ export function FinanceOperations() {
   const tariff = data?.tariffs.find(
     (item) =>
       item.active &&
-      item.verified_by_1 &&
-      item.verified_by_2 &&
-      item.verified_by_1 !== item.verified_by_2 &&
       item.effective_from <= periodStart &&
       (!item.effective_to || item.effective_to >= periodEnd),
   );
@@ -335,6 +332,7 @@ export function FinanceOperations() {
     (row, index) =>
       index === 0 ||
       index === storageRows.length - 1 ||
+      row.movementKg !== 0 ||
       row.movementBags !== 0 ||
       row.rate !== storageRows[index - 1]?.rate,
   );
@@ -469,7 +467,7 @@ export function FinanceOperations() {
     if (!selectedClient || !selectedLot || periodStart > periodEnd) return;
     if (!tariff) {
       setStorageError(
-        "Daily charge is blocked because no active, independently verified tariff covers this period. Open Rates to see what is missing.",
+        "Daily charge is blocked because no active storage tariff covers this period. Open Rates to see what is missing.",
       );
       return;
     }
@@ -503,7 +501,7 @@ export function FinanceOperations() {
     if (!storage || !selectedRentRecord || !visibleTariff) return;
     if (!tariff) {
       setMessage(
-        "Storage billing is disabled until the tariff has two independent verifications.",
+        "Storage billing is disabled until an active tariff covers the selected period.",
       );
       return;
     }
@@ -1140,7 +1138,7 @@ export function FinanceOperations() {
                 <h2>Storage charge review</h2>
                 <p>
                   {selectedRentRecord && selectedLot
-                    ? `${selectedRentRecord.rent_number} · ${selectedLot.lot_number} · ${selectedLot.bag_count} current bags`
+                    ? `${selectedRentRecord.rent_number} · ${selectedLot.lot_number} · ${Number(selectedLot.quantity_kg).toLocaleString()} kg · ${selectedLot.bag_count} current bags`
                     : "Select a recorded rent instruction"}
                 </p>
               </div>
@@ -1241,13 +1239,13 @@ export function FinanceOperations() {
               <span>
                 <strong>
                   {tariff
-                    ? `${tariff.version_code} verified rate source`
+                    ? `${tariff.version_code} active agreement rates`
                     : "Storage rates are not ready"}
                 </strong>
                 <small>
                   {tariff
-                    ? "The database—not the browser—selects the rate for every day."
-                    : "Daily charges need an active tariff with two independent verifications and rates for this category."}
+                    ? "The database recalculates each day from the remaining kg or bag balance."
+                    : "Daily charges need an active tariff with rates for this category."}
                 </small>
               </span>
               {!tariff && (
@@ -1287,7 +1285,7 @@ export function FinanceOperations() {
                 </strong>
               </div>
               <div>
-                <span>Billable bag-days</span>
+                <span>{category === "EMPTY_BAGS" ? "Billable 50-bag days" : "Equivalent bag-days"}</span>
                 <strong>
                   {storage?.billableBagDays.toLocaleString() ?? "-"}
                 </strong>
@@ -1350,7 +1348,7 @@ export function FinanceOperations() {
                 );
                 const previous = storageRows[sourceIndex - 1];
                 const reason =
-                  row.movementBags !== 0
+                  row.movementKg !== 0 || row.movementBags !== 0
                     ? `Stock movement${row.references.length ? ` · ${row.references.join(", ")}` : ""}`
                     : previous && row.rate !== previous.rate
                       ? `Rate changed from ETB ${previous.rate}`
@@ -1362,7 +1360,7 @@ export function FinanceOperations() {
                 return (
                   <div
                     className={
-                      row.movementBags !== 0 ||
+                      row.movementKg !== 0 || row.movementBags !== 0 ||
                       (previous && row.rate !== previous.rate)
                         ? "changed-day"
                         : ""
@@ -1370,23 +1368,33 @@ export function FinanceOperations() {
                     key={row.date}
                   >
                     <span>{row.date}</span>
-                    <span>{Number(row.openingBags).toLocaleString()}</span>
+                    <span>
+                      <strong>{category === "EMPTY_BAGS" ? `${Number(row.openingBags).toLocaleString()} bags` : `${Number(row.openingKg).toLocaleString()} kg`}</strong>
+                      {category !== "EMPTY_BAGS" && <small>{(Number(row.openingKg) / Number(storage?.bagWeightKg || 60)).toLocaleString()} equivalent bags</small>}
+                    </span>
                     <span
                       className={
-                        row.movementBags < 0
+                        (category === "EMPTY_BAGS" ? row.movementBags : row.movementKg) < 0
                           ? "negative"
-                          : row.movementBags > 0
+                          : (category === "EMPTY_BAGS" ? row.movementBags : row.movementKg) > 0
                             ? "positive"
                             : ""
                       }
                     >
-                      {row.movementBags > 0 ? "+" : ""}
-                      {Number(row.movementBags).toLocaleString()}
+                      <strong>
+                        {(category === "EMPTY_BAGS" ? row.movementBags : row.movementKg) > 0 ? "+" : ""}
+                        {Number(category === "EMPTY_BAGS" ? row.movementBags : row.movementKg).toLocaleString()} {category === "EMPTY_BAGS" ? "bags" : "kg"}
+                      </strong>
+                      {category !== "EMPTY_BAGS" && row.movementBags !== 0 && <small>{row.movementBags > 0 ? "+" : ""}{Number(row.movementBags).toLocaleString()} bags recorded</small>}
                     </span>
-                    <span>{Number(row.closingBags).toLocaleString()}</span>
+                    <span>
+                      <strong>{category === "EMPTY_BAGS" ? `${Number(row.closingBags).toLocaleString()} bags` : `${Number(row.closingKg).toLocaleString()} kg`}</strong>
+                      <small>{Number(row.units).toLocaleString()} {category === "EMPTY_BAGS" ? "groups of 50" : "equivalent bags"}</small>
+                    </span>
                     <span>Day {row.ageDay}</span>
                     <span>
                       <strong>ETB {Number(row.rate).toLocaleString()}</strong>
+                      <small>per {category === "EMPTY_BAGS" ? "50 bags" : "equivalent bag"}/day</small>
                     </span>
                     <span>ETB {Number(row.amount).toLocaleString()}</span>
                     <span>
@@ -1405,7 +1413,7 @@ export function FinanceOperations() {
               <p className="empty-result">
                 {tariff
                   ? "Choose a recorded rent instruction, set the billing end date, then calculate the daily charges."
-                  : "Daily charges cannot be calculated until the real storage rates are configured and independently verified."}
+                  : "Daily charges cannot be calculated until active storage rates cover this period."}
               </p>
             )}
           </section>
@@ -1540,8 +1548,8 @@ export function FinanceOperations() {
               </strong>
               <p>
                 {tariff
-                  ? "Two database reviewers are recorded. Confirm every transcribed figure against Agreement 001/2018 before production billing."
-                  : "Draft from Agreement 001/2018. Three-month bands use a 30-day month and require two independent verifications before billing can post."}
+                  ? "Agreement 001/2018 rates are active. Three-month bands use a 30-day month."
+                  : "No active tariff covers the selected billing period."}
               </p>
             </div>
             <ShieldCheck size={18} />
@@ -1572,8 +1580,7 @@ export function FinanceOperations() {
           {visibleTariffLines.length === 0 && (
             <p className="empty-result">
               No storage rates are stored yet. Finance must enter the real rates
-              from the signed agreement before two different employees verify
-              and activate the tariff.
+              from the signed agreement before rent can be calculated.
             </p>
           )}
           <div className="locked-action">

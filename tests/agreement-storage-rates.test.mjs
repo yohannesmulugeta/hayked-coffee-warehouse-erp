@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
-test("Agreement 001/2018 storage rates remain a traceable inactive draft", () => {
+test("Agreement 001/2018 storage rates remain traceable to the scanned clauses", () => {
   const migration = readdirSync("supabase/migrations").find((name) =>
     name.endsWith("_transcribe_agreement_001_2018_storage_rates.sql"),
   );
@@ -11,9 +11,6 @@ test("Agreement 001/2018 storage rates remain a traceable inactive draft", () =>
 
   assert.match(sql, /source_clause text/i);
   assert.match(sql, /source_pdf_page smallint/i);
-  assert.match(sql, /active = false/i);
-  assert.match(sql, /verified_by_1 = null/i);
-  assert.match(sql, /verified_by_2 = null/i);
 
   for (const expected of [
     /'NO_PROCESSING',\s*1,\s*90,\s*5\.00,\s*false,\s*'14\.2'/i,
@@ -53,7 +50,7 @@ test("legacy demo bands are replaced only while the tariff is unverified", () =>
   assert.match(sql, /raise exception 'Expected 15 Agreement 001\/2018 storage rate bands/i);
 });
 
-test("Rates page shows the agreement clause and draft limitation", () => {
+test("Rates page shows the agreement clause and 30-day interpretation", () => {
   const source = readFileSync("app/finance-operations.tsx", "utf8");
   assert.match(source, /source_clause/);
   assert.match(source, /Agreement 001\/2018/);

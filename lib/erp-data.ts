@@ -682,8 +682,8 @@ export type PaymentRow = { id: string; payment_number: string; invoice_id: strin
 export type ServiceEventRow = { id: string; client_id: string; service_type: string; description: string; quantity: number; unit_price: number; total_amount: number; reference_id: string | null; reference_type: string | null; service_date: string; unit_label: string; invoice_id: string | null; status: string; created_at: string };
 export type StorageRentRecordRow = { id: string; rent_number: string; client_id: string; lot_id: string; storage_category: string; charge_start_on: string; billed_through_on: string | null; status: string; evidence_reference: string | null; note: string | null; recorded_by: string; created_at: string; updated_at: string };
 export type TariffLineItemRow = { id: string; tariff_version_id: string; category: string; age_start_days: number; age_end_days: number | null; daily_rate_per_unit: number; certified: boolean; source_clause: string | null; source_pdf_page: number | null };
-export type StorageQuoteRow = { date: string; openingBags: number; movementBags: number; closingBags: number; ageDay: number; rate: number; units: number; amount: number; references: string[] };
-export type StorageQuote = { tariffVersion: string; duplicateKey: string; billableBagDays: number; amount: number; rows: StorageQuoteRow[] };
+export type StorageQuoteRow = { date: string; openingBags: number; movementBags: number; closingBags: number; openingKg: number; movementKg: number; closingKg: number; ageDay: number; rate: number; units: number; amount: number; references: string[] };
+export type StorageQuote = { tariffVersion: string; billingBasis: "EQUIVALENT_BAG_FROM_KG" | "FIFTY_EMPTY_BAGS"; bagWeightKg: number; duplicateKey: string; billableBagDays: number; amount: number; rows: StorageQuoteRow[] };
 export type FinanceData = {
   invoices: InvoiceRow[];
   payments: PaymentRow[];
