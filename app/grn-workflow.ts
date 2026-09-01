@@ -36,6 +36,7 @@ export type WarehouseReceipt = {
   certificationValidTo?: string;
   receivedBy: string;
   createdBy: string;
+  preparedById?: string;
   status: ReceiptStatus;
   lotNumber?: string;
 };

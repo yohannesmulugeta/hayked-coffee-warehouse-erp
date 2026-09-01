@@ -252,6 +252,7 @@ export async function loadCoreData(): Promise<CoreData> {
       certificateNumber: item.certificate_number ?? "", certificationIssuer: item.certification_issuer ?? "",
       certificationValidFrom: item.certification_valid_from ?? "", certificationValidTo: item.certification_valid_to ?? "",
       receivedBy: profileById.get(item.prepared_by)?.full_name ?? "-", createdBy: profileById.get(item.prepared_by)?.full_name ?? "-",
+      preparedById: item.prepared_by,
       status: item.status, lotNumber: lotByReceipt.get(item.id)?.lot_number,
     })),
     lots: lots.map((item) => {

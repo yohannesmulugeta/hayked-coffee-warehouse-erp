@@ -105,6 +105,9 @@ test("daily work has direct, plain-language actions and complete finance evidenc
   assert.match(page, /onNavigate=\{navigate\}/);
   assert.match(page, /Search any client, coffee, payment or document/);
   assert.match(clients, /Edit client/);
+  assert.match(clients, /Add agreement/);
+  assert.match(clients, /Add representative/);
+  assert.match(clients, /initialClientId/);
   assert.match(clients, /updateClientProfile/);
   assert.match(clients, /This agreement tells the ERP/);
   assert.match(processing, /Submit for Approval/);
@@ -122,6 +125,23 @@ test("daily work has direct, plain-language actions and complete finance evidenc
   assert.match(finance, /Payer name/);
   assert.match(finance, /Full client account/);
   assert.match(finance, /database rate record/i);
+});
+
+test("client readiness can be completed later and receipt self-approval is explained before action", async () => {
+  const [page, core, data, grn] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/core-operations.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/erp-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/grn-workflow.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(core, /setMasterModal\(\{ kind: "agreement", clientId: selectedMaster\.record\.id \}\)/);
+  assert.match(core, /setMasterModal\(\{ kind: "representative", clientId: selectedMaster\.record\.id \}\)/);
+  assert.match(core, /receipt\.preparedById === userId/);
+  assert.match(core, /Another employee approves/);
+  assert.match(page, /<CoreOperations activeView=\{activeView\} userId=\{profile\.id\}/);
+  assert.match(data, /preparedById: item\.prepared_by/);
+  assert.match(grn, /preparedById\?: string/);
 });
 
 test("certification and ECX controls are database-authoritative", async () => {
