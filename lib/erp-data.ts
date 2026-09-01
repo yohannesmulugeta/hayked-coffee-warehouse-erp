@@ -681,7 +681,7 @@ export type InvoiceRow = { id: string; invoice_number: string; client_id: string
 export type PaymentRow = { id: string; payment_number: string; invoice_id: string; client_id: string; amount_etb: number; bank_reference: string; paid_at: string; direction: string; payment_method: string; payer_name: string | null; financial_institution: string | null; payment_note: string | null };
 export type ServiceEventRow = { id: string; client_id: string; service_type: string; description: string; quantity: number; unit_price: number; total_amount: number; reference_id: string | null; reference_type: string | null; service_date: string; unit_label: string; invoice_id: string | null; status: string; created_at: string };
 export type StorageRentRecordRow = { id: string; rent_number: string; client_id: string; lot_id: string; storage_category: string; charge_start_on: string; billed_through_on: string | null; status: string; evidence_reference: string | null; note: string | null; recorded_by: string; created_at: string; updated_at: string };
-export type TariffLineItemRow = { id: string; tariff_version_id: string; category: string; age_start_days: number; age_end_days: number | null; daily_rate_per_unit: number; certified: boolean };
+export type TariffLineItemRow = { id: string; tariff_version_id: string; category: string; age_start_days: number; age_end_days: number | null; daily_rate_per_unit: number; certified: boolean; source_clause: string | null; source_pdf_page: number | null };
 export type StorageQuoteRow = { date: string; openingBags: number; movementBags: number; closingBags: number; ageDay: number; rate: number; units: number; amount: number; references: string[] };
 export type StorageQuote = { tariffVersion: string; duplicateKey: string; billableBagDays: number; amount: number; rows: StorageQuoteRow[] };
 export type FinanceData = {
@@ -707,7 +707,7 @@ export async function loadFinanceData(): Promise<FinanceData> {
     db.from("warehouse_receipts").select("id,arrival_at"),
     db.from("stock_movements").select("lot_id,bag_delta,occurred_at,reference_type").order("occurred_at"),
     db.from("tariff_versions").select("id,version_code,description,effective_from,effective_to,active,verified_by_1,verified_by_2").order("effective_from", { ascending: false }),
-    db.from("tariff_line_items").select("id,tariff_version_id,category,age_start_days,age_end_days,daily_rate_per_unit,certified").order("category").order("age_start_days"),
+    db.from("tariff_line_items").select("id,tariff_version_id,category,age_start_days,age_end_days,daily_rate_per_unit,certified,source_clause,source_pdf_page").order("category").order("age_start_days"),
     db.from("storage_billing_runs").select("id,duplicate_key,client_id,lot_id,storage_rent_record_id,run_number,total_amount,status").order("created_at", { ascending: false }),
     db.from("storage_rent_records").select("id,rent_number,client_id,lot_id,storage_category,charge_start_on,billed_through_on,status,evidence_reference,note,recorded_by,created_at,updated_at").order("created_at", { ascending: false }),
     db.from("service_events").select("id,client_id,service_type,description,quantity,unit_price,total_amount,reference_id,reference_type,service_date,unit_label,invoice_id,status,created_at").order("created_at", { ascending: false }),

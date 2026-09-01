@@ -414,21 +414,8 @@ insert into public.payments (id, payment_number, invoice_id, client_id, amount_e
 values ('a1000000-0000-0000-0000-000000000001', 'PAY-2026-0044', 'a0000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', 75000, '2026-08-03 14:10:00+03', 'CBE-FT-8831041', '10000000-0000-0000-0000-000000000005')
 on conflict (id) do nothing;
 
-update public.tariff_versions set active = true, verified_by_1 = '10000000-0000-0000-0000-000000000005', verified_by_2 = '10000000-0000-0000-0000-000000000002'
-where version_code = 'TARIFF-2026-V1';
-insert into public.tariff_line_items (id, tariff_version_id, category, age_start_days, age_end_days, daily_rate_per_unit, certified)
-select rate.id::uuid, tariff.id, rate.category, rate.start_day::integer, rate.end_day::integer, rate.amount::numeric, rate.certified::boolean
-from public.tariff_versions tariff
-cross join (values
-  ('e1000000-0000-0000-0000-000000000001', 'NO_PROCESSING', 0, 30, 0.00, false),
-  ('e1000000-0000-0000-0000-000000000002', 'NO_PROCESSING', 31, 60, 0.45, false),
-  ('e1000000-0000-0000-0000-000000000003', 'WAITING_PROCESSING', 0, 15, 0.00, false),
-  ('e1000000-0000-0000-0000-000000000004', 'WAITING_PROCESSING', 16, 60, 0.65, false),
-  ('e1000000-0000-0000-0000-000000000005', 'PROCESSED_EXPORT', 0, 15, 0.00, false),
-  ('e1000000-0000-0000-0000-000000000006', 'PROCESSED_EXPORT', 16, 60, 0.85, false)
-) rate(id, category, start_day, end_day, amount, certified)
-where tariff.version_code = 'TARIFF-2026-V1'
-on conflict (id) do nothing;
+-- Agreement 001/2018 storage figures are inserted by the controlled tariff
+-- transcription migration and intentionally remain inactive until reviewed.
 
 insert into public.storage_billing_runs (id, run_number, client_id, lot_id, category, period_start, period_end, tariff_version, billable_bag_days, total_amount, duplicate_key, status, run_by)
 values ('e2000000-0000-0000-0000-000000000001', 'SBR-2026-0008', '20000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000011', 'PROCESSED_EXPORT', '2026-07-15', '2026-07-31', 'TARIFF-2026-V1', 2550, 2167.50, 'sample|guji|processed|2026-07', 'POSTED', '10000000-0000-0000-0000-000000000005')

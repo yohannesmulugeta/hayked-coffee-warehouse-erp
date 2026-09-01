@@ -55,11 +55,11 @@ const billingTabs: { id: Tab; label: string }[] = [
   { id: "Rate Reference", label: "Rates" },
 ];
 
-const storageCategories: { id: StorageCategory; label: string; unit: string }[] = [
+const storageCategories: { id: StorageCategory; label: string; unit: string; missingNote?: string }[] = [
   { id: "NO_PROCESSING", label: "Stored without processing", unit: "bag/day" },
   { id: "WAITING_PROCESSING", label: "Waiting for processing", unit: "bag/day" },
   { id: "PROCESSED_EXPORT", label: "Processed export coffee", unit: "bag/day" },
-  { id: "GRADE_IMPROVEMENT", label: "Grade-improvement coffee", unit: "bag/day" },
+  { id: "GRADE_IMPROVEMENT", label: "Grade-improvement coffee", unit: "bag/day", missingNote: "No separate rate identified in Agreement 001/2018" },
   { id: "REJECT", label: "Reject coffee", unit: "bag/day" },
   { id: "EMPTY_BAGS", label: "Empty bags", unit: "50 bags/day" },
 ];
@@ -1541,7 +1541,7 @@ export function FinanceOperations() {
               <p>
                 {tariff
                   ? "Two database reviewers are recorded. Confirm every transcribed figure against Agreement 001/2018 before production billing."
-                  : "Scanned tariff figures require two independent verifications before billing can post."}
+                  : "Draft from Agreement 001/2018. Three-month bands use a 30-day month and require two independent verifications before billing can post."}
               </p>
             </div>
             <ShieldCheck size={18} />
@@ -1561,8 +1561,9 @@ export function FinanceOperations() {
                       Day {line.age_start_days} to {line.age_end_days ?? "onward"}{" "}
                       · ETB {Number(line.daily_rate_per_unit).toLocaleString()} / {storageCategory.unit}
                       {line.certified ? " · Certified" : " · Standard"}
+                      {line.source_clause ? ` · Clause ${line.source_clause}${line.source_pdf_page ? `, PDF p.${line.source_pdf_page}` : ""}` : ""}
                     </small>
-                  )) : <small>No rate configured</small>}
+                  )) : <small>{storageCategory.missingNote ?? "No rate configured"}</small>}
                 </span>
               </article>
               );
