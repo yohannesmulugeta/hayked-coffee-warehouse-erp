@@ -86,6 +86,9 @@ test("processing, storage loss, billing, reports and audit use guided workspaces
   assert.match(finance, /daysOverdue/);
   assert.match(finance, /Current outstanding always\s+shows the complete account balance/);
   assert.match(finance, /Show changes only/);
+  assert.match(finance, /Storage Charges/);
+  assert.match(finance, /Daily charge is blocked because no active, independently verified tariff covers this period/);
+  assert.doesNotMatch(finance, /More billing tools/);
   assert.match(management, /loadReportTable/);
   assert.match(management, /Export CSV/);
   assert.match(management, /Search reference, user, action/);

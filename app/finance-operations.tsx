@@ -45,6 +45,25 @@ type Tab =
   | "Client Statement"
   | "Rate Reference";
 
+const billingTabs: { id: Tab; label: string }[] = [
+  { id: "Client Accounts", label: "Client Accounts" },
+  { id: "Unbilled Services", label: "Unbilled Services" },
+  { id: "Invoices", label: "Invoices" },
+  { id: "Payments", label: "Payments" },
+  { id: "Storage Review", label: "Storage Charges" },
+  { id: "Client Statement", label: "Statements" },
+  { id: "Rate Reference", label: "Rates" },
+];
+
+const storageCategories: { id: StorageCategory; label: string; unit: string }[] = [
+  { id: "NO_PROCESSING", label: "Stored without processing", unit: "bag/day" },
+  { id: "WAITING_PROCESSING", label: "Waiting for processing", unit: "bag/day" },
+  { id: "PROCESSED_EXPORT", label: "Processed export coffee", unit: "bag/day" },
+  { id: "GRADE_IMPROVEMENT", label: "Grade-improvement coffee", unit: "bag/day" },
+  { id: "REJECT", label: "Reject coffee", unit: "bag/day" },
+  { id: "EMPTY_BAGS", label: "Empty bags", unit: "50 bags/day" },
+];
+
 function Status({ value }: { value: string }) {
   return (
     <span className={`status-pill ${value.toLowerCase().replaceAll("_", "-")}`}>
@@ -296,7 +315,9 @@ export function FinanceOperations() {
       item.active &&
       item.verified_by_1 &&
       item.verified_by_2 &&
-      item.verified_by_1 !== item.verified_by_2,
+      item.verified_by_1 !== item.verified_by_2 &&
+      item.effective_from <= periodStart &&
+      (!item.effective_to || item.effective_to >= periodEnd),
   );
   const visibleTariff = tariff ?? data?.tariffs[0];
   const visibleTariffLines =
@@ -445,13 +466,13 @@ export function FinanceOperations() {
     setShowAllStorageDays(false);
   }
   async function calculateStorageQuote() {
-    if (
-      !selectedClient ||
-      !selectedLot ||
-      !visibleTariff ||
-      periodStart > periodEnd
-    )
+    if (!selectedClient || !selectedLot || periodStart > periodEnd) return;
+    if (!tariff) {
+      setStorageError(
+        "Daily charge is blocked because no active, independently verified tariff covers this period. Open Rates to see what is missing.",
+      );
       return;
+    }
     setStorageBusy(true);
     setStorageError("");
     setStorage(null);
@@ -463,7 +484,7 @@ export function FinanceOperations() {
           category,
           periodStart,
           periodEnd,
-          tariffVersion: visibleTariff.version_code,
+          tariffVersion: tariff.version_code,
           certified: selectedLotCertified,
         }),
       );
@@ -624,42 +645,18 @@ export function FinanceOperations() {
         ]}
       />
       <div className="module-tabs billing-primary-tabs" role="tablist">
-        {(
-          [
-            "Client Accounts",
-            "Unbilled Services",
-            "Invoices",
-            "Payments",
-          ] as Tab[]
-        ).map((item) => (
+        {billingTabs.map((item) => (
           <button
             role="tab"
-            aria-selected={tab === item}
-            className={tab === item ? "active" : ""}
+            aria-selected={tab === item.id}
+            className={tab === item.id ? "active" : ""}
             type="button"
-            key={item}
-            onClick={() => setTab(item)}
+            key={item.id}
+            onClick={() => setTab(item.id)}
           >
-            {item}
+            {item.label}
           </button>
         ))}
-        <details>
-          <summary>More billing tools</summary>
-          <div>
-            {(
-              ["Storage Review", "Client Statement", "Rate Reference"] as Tab[]
-            ).map((item) => (
-              <button
-                className={tab === item ? "active" : ""}
-                type="button"
-                key={item}
-                onClick={() => setTab(item)}
-              >
-                {item}
-              </button>
-            ))}
-          </div>
-        </details>
       </div>
 
       {["Client Accounts", "Unbilled Services", "Invoices"].includes(tab) && (
@@ -1239,18 +1236,25 @@ export function FinanceOperations() {
                 <span><strong>{selectedLotCertified ? "Verified certified rate applies" : "Standard rate applies"}</strong><small>{!selectedLot ? "Choose a lot to check certification" : selectedLotCertified ? `${selectedLot.certification_schemes?.join(", ")} · valid for the full billing period` : "Certification is not verified for the full selected period"}</small></span>
               </div>
             </div>
-            <div className="tariff-source">
-              <ShieldCheck size={16} />
+            <div className={`tariff-source ${tariff ? "" : "blocked"}`}>
+              {tariff ? <ShieldCheck size={16} /> : <AlertTriangle size={16} />}
               <span>
                 <strong>
                   {tariff
                     ? `${tariff.version_code} verified rate source`
-                    : "No verified tariff"}
+                    : "Storage rates are not ready"}
                 </strong>
                 <small>
-                  The database—not the browser—selects the rate for every day.
+                  {tariff
+                    ? "The database—not the browser—selects the rate for every day."
+                    : "Daily charges need an active tariff with two independent verifications and rates for this category."}
                 </small>
               </span>
+              {!tariff && (
+                <button type="button" onClick={() => setTab("Rate Reference")}>
+                  View rates
+                </button>
+              )}
             </div>
             <button
               className="secondary-button calculate-storage-button"
@@ -1259,7 +1263,6 @@ export function FinanceOperations() {
               disabled={
                 !selectedLot ||
                 !selectedRentRecord ||
-                !tariff ||
                 storageBusy ||
                 periodStart > periodEnd
               }
@@ -1400,8 +1403,9 @@ export function FinanceOperations() {
             )}
             {!storage && !storageBusy && (
               <p className="empty-result">
-                Choose a recorded rent instruction, set the billing end date,
-                then calculate the daily charges.
+                {tariff
+                  ? "Choose a recorded rent instruction, set the billing end date, then calculate the daily charges."
+                  : "Daily charges cannot be calculated until the real storage rates are configured and independently verified."}
               </p>
             )}
           </section>
@@ -1543,24 +1547,32 @@ export function FinanceOperations() {
             <ShieldCheck size={18} />
           </div>
           <section className="tariff-grid">
-            {visibleTariffLines.map((line) => (
-              <article key={line.id}>
+            {storageCategories.map((storageCategory) => {
+              const lines = visibleTariffLines.filter(
+                (line) => line.category === storageCategory.id,
+              );
+              return (
+              <article className={lines.length ? "" : "missing"} key={storageCategory.id}>
                 <ReceiptText size={18} />
                 <span>
-                  <strong>{line.category.replaceAll("_", " ")}</strong>
-                  <small>
-                    Day {line.age_start_days} to {line.age_end_days ?? "onward"}{" "}
-                    · ETB {Number(line.daily_rate_per_unit).toLocaleString()} /{" "}
-                    {line.category === "EMPTY_BAGS" ? "50 bags/day" : "bag/day"}
-                    {line.certified ? " · Certified" : ""}
-                  </small>
+                  <strong>{storageCategory.label}</strong>
+                  {lines.length ? lines.map((line) => (
+                    <small key={line.id}>
+                      Day {line.age_start_days} to {line.age_end_days ?? "onward"}{" "}
+                      · ETB {Number(line.daily_rate_per_unit).toLocaleString()} / {storageCategory.unit}
+                      {line.certified ? " · Certified" : " · Standard"}
+                    </small>
+                  )) : <small>No rate configured</small>}
                 </span>
               </article>
-            ))}
+              );
+            })}
           </section>
-          {visibleTariff && visibleTariffLines.length === 0 && (
+          {visibleTariffLines.length === 0 && (
             <p className="empty-result">
-              This tariff has no configured storage rates.
+              No storage rates are stored yet. Finance must enter the real rates
+              from the signed agreement before two different employees verify
+              and activate the tariff.
             </p>
           )}
           <div className="locked-action">
