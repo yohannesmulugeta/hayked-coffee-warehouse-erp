@@ -21,6 +21,7 @@ export const managementViews = [
 export function isImplementedView(view: string) {
   return view === "Dashboard"
     || view === "Processing"
+    || view === "Laboratory"
     || coreViews.includes(view)
     || warehouseControlViews.includes(view)
     || dispatchViews.includes(view)

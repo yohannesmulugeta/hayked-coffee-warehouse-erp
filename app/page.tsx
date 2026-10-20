@@ -13,6 +13,7 @@ import {
   CircleUserRound,
   ClipboardCheck,
   FileText,
+  FlaskConical,
   Gauge,
   LayoutDashboard,
   Menu,
@@ -37,6 +38,7 @@ import { dispatchViews, financeViews, isImplementedView, managementViews, wareho
 
 const CoreOperations = lazy(() => import("./core-operations").then((module) => ({ default: module.CoreOperations })));
 const ProcessingOperations = lazy(() => import("./processing-operations").then((module) => ({ default: module.ProcessingOperations })));
+const LaboratoryOperations = lazy(() => import("./laboratory-operations").then((module) => ({ default: module.LaboratoryOperations })));
 const WarehouseControls = lazy(() => import("./warehouse-controls").then((module) => ({ default: module.WarehouseControls })));
 const DispatchOperations = lazy(() => import("./dispatch-operations").then((module) => ({ default: module.DispatchOperations })));
 const FinanceOperations = lazy(() => import("./finance-operations").then((module) => ({ default: module.FinanceOperations })));
@@ -51,6 +53,7 @@ const operations: NavItem[] = [
   { view: "Warehouse Receipts", label: "Receive Coffee", icon: ClipboardCheck },
   { view: "Coffee Lots", label: "Coffee Stock", icon: Warehouse },
   { view: "Processing", label: "Processing", icon: Boxes },
+  { view: "Laboratory", label: "Laboratory", icon: FlaskConical },
   { view: "Dispatch", label: "Dispatch", icon: PackageCheck },
   { view: "Labour", label: "Labour & Services", icon: CircleUserRound },
 ];
@@ -208,7 +211,10 @@ type CurrentProfile = { id: string; full_name: string; role: string };
 
 function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: CurrentProfile }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeView, setActiveView] = useState("Dashboard");
+  const [activeView, setActiveView] = useState(() => {
+    const requested = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("view");
+    return requested === "Laboratory" && canAccessView(profile.role, requested) ? requested : "Dashboard";
+  });
   const [query, setQuery] = useState("");
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus>(supabaseConfigured ? "loading" : "demo");
@@ -360,7 +366,7 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
               {filteredActivities.length ? filteredActivities.map((row, rowIndex) => <div role="row" key={`${row[0]}-${rowIndex}`}>{row.map((cell, index) => <span role="cell" key={`${cell}-${index}`} className={index === 0 ? "reference" : ""}>{cell}</span>)}</div>) : <p className="empty-result">No activity matches &quot;{query}&quot;.</p>}
             </div>
           </section>}
-        </div> : <Suspense fallback={<ModuleLoading label={viewLabels.get(activeView) ?? activeView} />}>{activeView === "Processing" ? <ProcessingOperations initialState={processingState} role={profile.role} userId={profile.id} /> : warehouseControlViews.includes(activeView) ? <WarehouseControls activeView={activeView} onNavigate={navigate} /> : dispatchViews.includes(activeView) ? <DispatchOperations activeView={activeView} onNavigate={navigate} /> : financeViews.includes(activeView) ? <FinanceOperations /> : managementViews.includes(activeView) ? <ManagementOperations activeView={activeView} onNavigate={navigate} initialReportType={reportType} /> : <CoreOperations activeView={activeView} userId={profile.id} stockIntent={stockIntent} onNavigate={navigate} />}</Suspense>}
+        </div> : <Suspense fallback={<ModuleLoading label={viewLabels.get(activeView) ?? activeView} />}>{activeView === "Processing" ? <ProcessingOperations initialState={processingState} role={profile.role} userId={profile.id} /> : activeView === "Laboratory" ? <LaboratoryOperations role={profile.role} userId={profile.id} onNavigate={navigate} /> : warehouseControlViews.includes(activeView) ? <WarehouseControls activeView={activeView} onNavigate={navigate} /> : dispatchViews.includes(activeView) ? <DispatchOperations activeView={activeView} onNavigate={navigate} /> : financeViews.includes(activeView) ? <FinanceOperations /> : managementViews.includes(activeView) ? <ManagementOperations activeView={activeView} onNavigate={navigate} initialReportType={reportType} /> : <CoreOperations activeView={activeView} userId={profile.id} stockIntent={stockIntent} onNavigate={navigate} />}</Suspense>}
       </section>
     </main>
   );
@@ -370,6 +376,14 @@ export default function Home() {
   const [signedIn, setSignedIn] = useState(false);
   const [checkingSession, setCheckingSession] = useState(supabaseConfigured);
   const [profile, setProfile] = useState<CurrentProfile>({ id: "", full_name: supabaseConfigured ? "Signed-in user" : "Local user", role: "viewer" });
+
+  // The query link opens the database-free public preview after hydration.
+  useEffect(() => {
+    if (!supabaseConfigured && new URLSearchParams(window.location.search).get("view") === "Laboratory") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSignedIn(true);
+    }
+  }, []);
 
   async function loadProfile(userId: string) {
     const { data } = await createSupabaseClient().from("profiles").select("full_name,role").eq("id", userId).maybeSingle();

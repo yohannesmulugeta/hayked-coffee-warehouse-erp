@@ -761,7 +761,7 @@ export type ArrearsEventRow = { id: string; case_id: string; from_stage: string 
 
 export async function loadManagementData() {
   const db = createSupabaseClient();
-  const [approvalResult, documentResult, auditResult, profileResult, receiptResult, requestResult, orderResult, dispatchResult, invoiceResult, paymentResult, lotResult, clientResult, arrearsResult, arrearsEventResult, adminUserResult] = await Promise.all([
+  const [approvalResult, documentResult, auditResult, profileResult, receiptResult, requestResult, orderResult, dispatchResult, invoiceResult, paymentResult, lotResult, clientResult, arrearsResult, arrearsEventResult, labSampleResult, adminUserResult] = await Promise.all([
     db.from("approvals").select("id,request_type,reference_id,requested_by,requested_at,status,decided_by,decided_at,decision_note").order("requested_at", { ascending: false }),
     db.from("documents").select("id,document_number,document_type,reference_type,reference_id,version,object_path,file_name,mime_type,size_bytes,status,created_at").order("created_at", { ascending: false }),
     db.from("audit_events").select("id,actor_id,action,reference_type,reference_id,occurred_at,event_data").order("occurred_at", { ascending: false }),
@@ -776,6 +776,7 @@ export async function loadManagementData() {
     db.from("clients").select("id,code,legal_name"),
     db.from("arrears_cases").select("id,case_number,client_id,invoice_id,stage,outstanding_etb,opened_on,oldest_due_on,next_action_on,assigned_to,notes,closed_at,created_at,updated_at").order("created_at", { ascending: false }),
     db.from("arrears_case_events").select("id,case_id,from_stage,to_stage,note,action_by,created_at").order("created_at", { ascending: false }),
+    db.from("lab_samples").select("id,sample_code"),
     db.rpc("list_admin_users"),
   ]);
   const references = new Map<string, string>();
@@ -789,6 +790,7 @@ export async function loadManagementData() {
   addReferences("PAYMENT", (paymentResult.data ?? []).map((item) => ({ id: item.id, label: item.payment_number })));
   addReferences("COFFEE_LOT", (lotResult.data ?? []).map((item) => ({ id: item.id, label: item.lot_number })));
   addReferences("CLIENT", (clientResult.data ?? []).map((item) => ({ id: item.id, label: `${item.code} - ${item.legal_name}` })));
+  addReferences("LAB_SAMPLE", (labSampleResult.data ?? []).map((item) => ({ id: item.id, label: item.sample_code })));
   const documents = result(documentResult.data as DocumentRow[] | null, documentResult.error).map((item) => ({ ...item, business_reference: references.get(item.reference_id) ?? item.reference_id.slice(0, 8).toUpperCase() }));
   const audit = result(auditResult.data as AuditRow[] | null, auditResult.error).map((item) => ({ ...item, business_reference: references.get(item.reference_id) ?? item.reference_id.slice(0, 8).toUpperCase() }));
   const clientNames = new Map((clientResult.data ?? []).map((item) => [item.id, item.legal_name]));
