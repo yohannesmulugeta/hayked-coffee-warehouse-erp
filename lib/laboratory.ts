@@ -100,6 +100,23 @@ export async function downloadLabReport(reportId: string, fileName: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+export async function openLabReportForPrint(reportId: string) {
+  const preview = window.open("", "_blank");
+  if (!preview) throw new Error("Allow pop-ups to open the printable report.");
+  preview.opener = null;
+  preview.document.title = "Preparing laboratory report";
+  preview.document.body.textContent = "Preparing printable report...";
+  try {
+    const response = await reportRequest(reportId, "GET");
+    const url = URL.createObjectURL(await response.blob());
+    preview.location.replace(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 30 * 60_000);
+  } catch (error) {
+    preview.close();
+    throw error;
+  }
+}
+
 export async function sendLabReport(reportId: string) {
   const response = await reportRequest(reportId, "POST");
   return response.json() as Promise<{ status: string; recipient: string; providerMessageId: string }>;

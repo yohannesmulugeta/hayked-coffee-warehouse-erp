@@ -1,11 +1,11 @@
 "use client";
 
-import { Check, Download, FileText, FlaskConical, Plus, RefreshCw, Send } from "lucide-react";
+import { Check, Download, FileText, FlaskConical, Plus, Printer, RefreshCw, Send } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { supabaseConfigured } from "@/lib/supabase/client";
 import { EvidenceUploader } from "./workflow-ui";
 import {
-  createLabSample, downloadLabReport, labResultsFromSample, loadLaboratoryData,
+  createLabSample, downloadLabReport, labResultsFromSample, loadLaboratoryData, openLabReportForPrint,
   saveLabSample, sendLabReport, transitionLabSample,
   type LabResults,
 } from "@/lib/laboratory";
@@ -13,6 +13,7 @@ import {
 type LabData = Awaited<ReturnType<typeof loadLaboratoryData>>;
 const canRecord = (role: string) => ["system_admin", "warehouse_manager", "processing_supervisor"].includes(role);
 const canApprove = (role: string) => ["system_admin", "warehouse_manager"].includes(role);
+const emailEnabled = process.env.NEXT_PUBLIC_LAB_EMAIL_ENABLED === "true";
 const emptyResults: LabResults = {
   moisturePercent: "", screen14Percent: "", shapeMake: "", greenOdour: "", greenColour: "",
   greenQuality: "", greenComment: "",
@@ -26,7 +27,7 @@ function LaboratoryPreview() {
   );
 
   return <div className="lab-preview">
-    <div className="prototype-note" role="status"><FlaskConical size={18} /><span><strong>Interface preview only</strong>Explore the laboratory process below. This preview has no database connection: samples cannot be saved, reports cannot be approved, and emails cannot be sent.</span></div>
+    <div className="prototype-note" role="status"><FlaskConical size={18} /><span><strong>Interface preview only</strong>This preview has no database connection. Samples cannot be saved and printable reports cannot be generated here.</span></div>
     <section className="lab-card">
       <div className="lab-section-head"><h2>1. Register a sample</h2><p>Record the client and origin. The sample can be linked to a warehouse lot or handled independently.</p></div>
       <div className="lab-grid">
@@ -40,7 +41,7 @@ function LaboratoryPreview() {
     </section>
     <section className="lab-card">
       <div className="lab-section-head"><h2>2. Evaluate the coffee</h2><p>Staff enter the physical analysis and cup observations from the sample assessment.</p></div>
-      <div className="lab-steps"><span className="done">1. Register</span><span>2. Evaluate</span><span>3. Approve</span><span>4. Email</span></div>
+      <div className="lab-steps"><span className="done">1. Register</span><span>2. Evaluate</span><span>3. Approve and print</span></div>
       <h3>Green coffee assessment</h3>
       <div className="lab-grid">{previewFields(["Moisture %", "Screen 14 and above %", "Shape and make", "Odour", "Colour", "Green quality"])}<label className="lab-wide">Overall green quality observations<textarea disabled placeholder="Defects and physical observations" /></label></div>
       <h3>Cup assessment</h3>
@@ -52,7 +53,7 @@ function LaboratoryPreview() {
     </section>
     <section className="lab-card lab-preview-finish">
       <div><h2>3. Review and approve</h2><p>A different authorized staff member reviews the evaluation. Approval creates a versioned PDF report.</p><button className="secondary-button" type="button" disabled><Check size={16} />Approve report</button></div>
-      <div><h2>4. Send to the client</h2><p>The approved PDF is sent to the email on the client record. The delivery attempt is recorded.</p><button className="secondary-button" type="button" disabled><Send size={16} />Send approved PDF</button></div>
+      <div><h2>Print the report</h2><p>Open the approved A4 PDF to print it or save a copy.</p><button className="secondary-button" type="button" disabled><Printer size={16} />Open printable PDF</button></div>
     </section>
   </div>;
 }
@@ -134,7 +135,7 @@ export function LaboratoryOperations({ role, userId, onNavigate }: { role: strin
   }
 
   return <div className="module-page laboratory-page">
-    <header className="lab-heading"><div><span className="demo-label">QUALITY SERVICES</span><h1>Laboratory</h1><p>Register samples, record green and cup observations, approve a report, then email the approved PDF to the client.</p></div><FlaskConical size={30} aria-hidden="true" /></header>
+    <header className="lab-heading"><div><span className="demo-label">QUALITY SERVICES</span><h1>Laboratory</h1><p>Register samples, record green and cup observations, approve a report, then open the PDF to print or download it.</p></div><FlaskConical size={30} aria-hidden="true" /></header>
     {error && <div className="request-form-error" role="alert">{error}</div>}
     {message && <div className="prototype-note" role="status"><Check size={18} /><span>{message}</span></div>}
     {!supabaseConfigured && <LaboratoryPreview />}
@@ -156,7 +157,7 @@ export function LaboratoryOperations({ role, userId, onNavigate }: { role: strin
       </button>)}
     </section>
     {selected && <section className="lab-card lab-detail"><div className="lab-section-head lab-record-head"><div><span className="demo-label">{selected.sample_code}</span><h2>{client?.legal_name}</h2><p>{selected.origin} · {selected.process} · received {selected.received_on} · {selected.lot_id ? `lot ${data?.lots.find((item) => item.id === selected.lot_id)?.lot_number ?? selected.lot_id}` : "independent sample"}</p>{selected.lot_id && <button type="button" className="link-button" onClick={() => onNavigate({ view: "Coffee Lots", focusId: selected.lot_id ?? undefined })}>Open linked lot</button>}</div><span className="lab-status">{selected.status}</span></div>
-      <div className="lab-steps"><span className="done">1. Register</span><span className={selected.status !== "DRAFT" ? "done" : ""}>2. Evaluate</span><span className={selected.status === "APPROVED" ? "done" : ""}>3. Approve</span><span className={delivery?.status === "ACCEPTED" ? "done" : ""}>4. Email</span></div>
+      <div className="lab-steps"><span className="done">1. Register</span><span className={selected.status !== "DRAFT" ? "done" : ""}>2. Evaluate</span><span className={selected.status === "APPROVED" ? "done" : ""}>3. Approve and print</span>{emailEnabled && <span className={delivery?.status === "ACCEPTED" ? "done" : ""}>4. Email</span>}</div>
       <form onSubmit={(event) => { event.preventDefault(); void run(() => saveLabSample(selected.id, results), "Draft evaluation saved.", selected.id); }}>
         <h3>Green coffee assessment</h3><div className="lab-grid">
           {input("moisturePercent", "Moisture %", { number: true })}{input("screen14Percent", "Screen 14 and above %", { number: true })}
@@ -176,13 +177,13 @@ export function LaboratoryOperations({ role, userId, onNavigate }: { role: strin
         <p className="lab-note">Scores and grades are entered by staff. The sample form does not establish Hayked scoring rules.</p>
         {selected.status === "DRAFT" && canRecord(role) && <div className="lab-actions"><button type="submit" className="secondary-button" disabled={busy}>Save draft</button><button type="button" className="primary-button" disabled={busy || !results.greenComment.trim() || !results.cupComment.trim() || !results.proposedGrade.trim()} onClick={() => void run(async () => { await saveLabSample(selected.id, results); await transitionLabSample("submit", selected.id); }, "Assessment submitted for independent review.", selected.id)}>Save and submit</button></div>}
       </form>
-      {selected.status === "SUBMITTED" && canApprove(role) && <div className="lab-review"><strong>Independent review</strong><p>Review every result above before approving. The person who submitted this assessment cannot approve it.</p><button className="primary-button" type="button" disabled={busy || selected.submitted_by === userId} onClick={() => void run(() => transitionLabSample("approve", selected.id), "Approved report created. It can now be downloaded or emailed.", selected.id)}><Check size={16} />Approve report</button></div>}
+      {selected.status === "SUBMITTED" && canApprove(role) && <div className="lab-review"><strong>Independent review</strong><p>Review every result above before approving. The person who submitted this assessment cannot approve it.</p><button className="primary-button" type="button" disabled={busy || selected.submitted_by === userId} onClick={() => void run(() => transitionLabSample("approve", selected.id), "Approved report created. It can now be opened for printing or downloaded.", selected.id)}><Check size={16} />Approve report</button></div>}
       {selected.status === "APPROVED" && canApprove(role) && <div className="lab-review"><strong>Need a correction?</strong><p>Reopening preserves the approved version. A corrected result must be submitted and approved as a new version.</p><button className="secondary-button" type="button" disabled={busy} onClick={() => void run(() => transitionLabSample("reopen", selected.id), "Sample reopened as a draft. The earlier approved report remains available.", selected.id)}><RefreshCw size={16} />Create revision</button></div>}
       <div className="lab-evidence"><EvidenceUploader reference={{ type: "LAB_SAMPLE", id: selected.id, label: selected.sample_code }} documentType="LAB_SOURCE_EVIDENCE" label="Source sheet or supporting evidence" help="Attach the original sample form or analysis evidence to this sample." /></div>
       <div className="lab-reports"><h3>Approved report versions</h3>{reports.length === 0 && <p className="empty-result">No report approved yet.</p>}
-        {reports.map((report) => <div className="lab-report-row" key={report.id}><FileText size={20} /><span><strong>Version {report.version}</strong><small>Approved {new Date(report.approved_at).toLocaleString()}</small></span><button type="button" className="secondary-button" disabled={busy} onClick={() => { setError(""); void downloadLabReport(report.id, `${selected.sample_code}-v${report.version}.pdf`).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "The PDF could not be downloaded.")); }}><Download size={15} />PDF</button></div>)}
+        {reports.map((report) => <div className="lab-report-row" key={report.id}><FileText size={20} /><span><strong>Version {report.version}</strong><small>Approved {new Date(report.approved_at).toLocaleString()}</small></span><button type="button" className="secondary-button" disabled={busy} onClick={() => { setError(""); void openLabReportForPrint(report.id).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "The printable PDF could not be opened.")); }}><Printer size={15} />Open to print</button><button type="button" className="secondary-button" disabled={busy} onClick={() => { setError(""); void downloadLabReport(report.id, `${selected.sample_code}-v${report.version}.pdf`).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "The PDF could not be downloaded.")); }}><Download size={15} />Download PDF</button></div>)}
       </div>
-      {selected.status === "APPROVED" && currentReport && <div className="lab-email"><h3>Email the current report</h3><p>The approved PDF will be attached to a message addressed to <strong>{client?.email || "No client email recorded"}</strong>.</p>
+      {emailEnabled && selected.status === "APPROVED" && currentReport && <div className="lab-email"><h3>Email the current report</h3><p>The approved PDF will be attached to a message addressed to <strong>{client?.email || "No client email recorded"}</strong>.</p>
         {delivery ? <p className="lab-delivery">Email status: <strong>{delivery.status}</strong> · {delivery.recipient_email} · {new Date(delivery.created_at).toLocaleString()}{delivery.status === "ACCEPTED" && <span> The provider accepted the message; delivery to the mailbox is not confirmed.</span>}</p> : null}
         {canApprove(role) && <button className="primary-button" type="button" disabled={busy || !client?.email || (delivery && delivery.status !== "FAILED") === true} onClick={() => void run(async () => { const sent = await sendLabReport(currentReport.id); setMessage(`Email accepted for ${sent.recipient}.`); }, "Email submitted to the provider.", selected.id)}><Send size={16} />Send approved PDF to client</button>}
         {!canApprove(role) && <p className="lab-note">A warehouse manager or administrator sends client reports.</p>}
