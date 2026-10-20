@@ -3,6 +3,7 @@
 import { Check, Download, FileText, FlaskConical, Plus, Printer, RefreshCw, Send } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { supabaseConfigured } from "@/lib/supabase/client";
+import { laboratoryDatabaseEnabled } from "@/lib/laboratory-config";
 import { EvidenceUploader } from "./workflow-ui";
 import {
   createLabSample, downloadLabReport, labResultsFromSample, loadLaboratoryData, openLabReportForPrint,
@@ -13,6 +14,7 @@ import {
 type LabData = Awaited<ReturnType<typeof loadLaboratoryData>>;
 const canRecord = (role: string) => ["system_admin", "warehouse_manager", "processing_supervisor"].includes(role);
 const canApprove = (role: string) => ["system_admin", "warehouse_manager"].includes(role);
+const laboratoryConnected = supabaseConfigured && laboratoryDatabaseEnabled;
 const emailEnabled = process.env.NEXT_PUBLIC_LAB_EMAIL_ENABLED === "true";
 const emptyResults: LabResults = {
   moisturePercent: "", screen14Percent: "", shapeMake: "", greenOdour: "", greenColour: "",
@@ -27,7 +29,7 @@ function LaboratoryPreview() {
   );
 
   return <div className="lab-preview">
-    <div className="prototype-note" role="status"><FlaskConical size={18} /><span><strong>Interface preview only</strong>This preview has no database connection. Samples cannot be saved and printable reports cannot be generated here.</span></div>
+    <div className="prototype-note" role="status"><FlaskConical size={18} /><span><strong>Laboratory preview only</strong>Laboratory records are not enabled on this site. Samples cannot be saved and printable reports cannot be generated here.</span></div>
     <section className="lab-card">
       <div className="lab-section-head"><h2>1. Register a sample</h2><p>Record the client and origin. The sample can be linked to a warehouse lot or handled independently.</p></div>
       <div className="lab-grid">
@@ -89,7 +91,7 @@ export function LaboratoryOperations({ role, userId, onNavigate }: { role: strin
   }
 
   useEffect(() => {
-    if (!supabaseConfigured) { setLoading(false); return; }
+    if (!laboratoryConnected) { setLoading(false); return; }
     let active = true;
     void loadLaboratoryData().then((next) => {
       if (!active) return;
@@ -138,9 +140,9 @@ export function LaboratoryOperations({ role, userId, onNavigate }: { role: strin
     <header className="lab-heading"><div><span className="demo-label">QUALITY SERVICES</span><h1>Laboratory</h1><p>Register samples, record green and cup observations, approve a report, then open the PDF to print or download it.</p></div><FlaskConical size={30} aria-hidden="true" /></header>
     {error && <div className="request-form-error" role="alert">{error}</div>}
     {message && <div className="prototype-note" role="status"><Check size={18} /><span>{message}</span></div>}
-    {!supabaseConfigured && <LaboratoryPreview />}
+    {!laboratoryConnected && <LaboratoryPreview />}
     {loading && <p className="empty-result" role="status">Loading laboratory records...</p>}
-    {!loading && supabaseConfigured && canRecord(role) && <section className="lab-card"><div className="lab-section-head"><h2>Register a sample</h2><p>A sample may be linked to warehouse stock or received separately.</p></div>
+    {!loading && laboratoryConnected && canRecord(role) && <section className="lab-card"><div className="lab-section-head"><h2>Register a sample</h2><p>A sample may be linked to warehouse stock or received separately.</p></div>
       <form className="lab-grid" onSubmit={register}>
         <label>Client<select required value={clientId} onChange={(event) => { setClientId(event.target.value); setLotId(""); }}><option value="">Select client</option>{data?.clients.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.legal_name}</option>)}</select></label>
         <label>Warehouse lot (optional)<select value={lotId} onChange={(event) => setLotId(event.target.value)} disabled={!clientId}><option value="">Independent sample</option>{data?.lots.filter((item) => item.client_id === clientId).map((item) => <option key={item.id} value={item.id}>{item.lot_number}</option>)}</select></label>
@@ -150,7 +152,7 @@ export function LaboratoryOperations({ role, userId, onNavigate }: { role: strin
         <button className="primary-button" type="submit" disabled={busy}><Plus size={16} />{busy ? "Saving..." : "Register sample"}</button>
       </form>
     </section>}
-    {!loading && supabaseConfigured && <div className="lab-workspace"><section className="lab-card lab-list"><div className="lab-section-head"><h2>Samples</h2><p>{data?.samples.length ?? 0} registered</p></div>
+    {!loading && laboratoryConnected && <div className="lab-workspace"><section className="lab-card lab-list"><div className="lab-section-head"><h2>Samples</h2><p>{data?.samples.length ?? 0} registered</p></div>
       {!data?.samples.length && <p className="empty-result">No laboratory samples recorded yet.</p>}
       {data?.samples.map((sample) => <button type="button" key={sample.id} className={`lab-sample-row ${sample.id === selectedId ? "selected" : ""}`} onClick={() => setSelectedId(sample.id)}>
         <strong>{sample.sample_code}</strong><span>{data.clients.find((item) => item.id === sample.client_id)?.legal_name ?? "Client"}</span><small>{sample.received_on} · {sample.origin}</small><b>{sample.status.replaceAll("_", " ")}</b>

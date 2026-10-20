@@ -2,7 +2,7 @@
 
 ## Public interface preview
 
-Open the preview deployment with `?view=Laboratory`. When the preview has no Supabase connection, this link opens the read-only sample and evaluation screens directly. Registration, approval, PDF generation, and client email are disabled and no data is stored. A working online preview requires a separate test database and preview-only credentials; the production database must not be used for this purpose.
+Open the deployment with `?view=Laboratory`. When `NEXT_PUBLIC_LAB_DATABASE_ENABLED` is unset or `false`, the Laboratory menu opens a read-only interface even if the rest of the ERP is connected to a database. Registration, approval, PDF generation, and client email are disabled and no laboratory data is stored. Set the flag to `true` only in an environment where the Laboratory migration has been applied and tested. The working local environment uses its own local database.
 
 ## Staff workflow
 

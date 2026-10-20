@@ -3,6 +3,7 @@ import { activeOn, clientReadiness } from "@/app/client-onboarding";
 import type { CoffeeLot, StockMovement, WarehouseReceipt } from "@/app/grn-workflow";
 import type { ProcessingOutputLine, ProcessingRequest, ProcessingRequestLine } from "@/app/processing-workflow";
 import { countLabel } from "./ui-format";
+import { laboratoryDatabaseEnabled } from "./laboratory-config";
 
 type DbError = { message: string; code?: string } | null;
 
@@ -776,7 +777,7 @@ export async function loadManagementData() {
     db.from("clients").select("id,code,legal_name"),
     db.from("arrears_cases").select("id,case_number,client_id,invoice_id,stage,outstanding_etb,opened_on,oldest_due_on,next_action_on,assigned_to,notes,closed_at,created_at,updated_at").order("created_at", { ascending: false }),
     db.from("arrears_case_events").select("id,case_id,from_stage,to_stage,note,action_by,created_at").order("created_at", { ascending: false }),
-    db.from("lab_samples").select("id,sample_code"),
+    laboratoryDatabaseEnabled ? db.from("lab_samples").select("id,sample_code") : Promise.resolve({ data: [] as { id: string; sample_code: string }[] }),
     db.rpc("list_admin_users"),
   ]);
   const references = new Map<string, string>();
