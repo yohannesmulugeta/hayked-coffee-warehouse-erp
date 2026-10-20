@@ -1,8 +1,8 @@
 # Laboratory sample evaluation
 
-## Public interface preview
+## Database availability
 
-Open the deployment with `?view=Laboratory`. When `NEXT_PUBLIC_LAB_DATABASE_ENABLED` is unset or `false`, the Laboratory menu opens a read-only interface even if the rest of the ERP is connected to a database. Registration, approval, PDF generation, and client email are disabled and no laboratory data is stored. Set the flag to `true` only in an environment where the Laboratory migration has been applied and tested. The working local environment uses its own local database.
+Open the deployment with `?view=Laboratory`. The production deployment uses the existing Hayked Supabase project for laboratory records and must have `NEXT_PUBLIC_LAB_DATABASE_ENABLED=true` after migration `20261020141735_laboratory_samples_and_reports` is applied. When the flag is unset or `false`, the Laboratory menu remains a read-only interface: registration, approval, and PDF generation are disabled. The local development environment uses its separate local database. Client email remains disabled unless configured separately.
 
 ## Staff workflow
 
