@@ -1,0 +1,39 @@
+name: ERP quality gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - codex/simplify-erp-workflows
+      - agent/processing-traceability-labour
+
+permissions:
+  contents: read
+
+jobs:
+  application:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build:next
+      - run: npm test
+      - run: npm audit --omit=dev
+
+  database:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+      - run: supabase start
+      - run: supabase test db
+      - run: supabase db lint --local --level warning

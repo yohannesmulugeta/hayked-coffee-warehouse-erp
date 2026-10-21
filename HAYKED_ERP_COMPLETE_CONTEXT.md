@@ -8,6 +8,8 @@
 
 > This document separates the intended product from what is actually persistent today. A screen looking complete does not mean its data is stored in the database.
 
+> **Historical snapshot notice (30 August 2026):** This long-form document records the 2 August architecture and gap analysis. Several persistence gaps listed below have since been implemented. Use the current repository, `README.md`, `IMPLEMENTATION_CHECKLIST.md`, and `docs/PHASE1_PRODUCTION_GATE.md` for present release status; unresolved business rules and production approval gates remain blocked.
+
 ## 1. What Hayked ERP Is
 
 Hayked Coffee Warehouse ERP is an operational system for Hayked General Trading PLC. Hayked receives, stores, processes, controls, and dispatches coffee that is usually owned by external clients.

@@ -2,7 +2,7 @@ import type { CoffeeLot } from "./grn-workflow";
 
 export type StockTypeFilter = "All" | "Arrival" | "Processed" | "Reject" | "Hayked Byproduct";
 export type StockStatusFilter = "All" | "Available" | "Waiting Processing" | "In Processing" | "Awaiting Dispatch" | "Reserved" | "Closed" | "Reversed";
-export type ProcessingStateFilter = "All" | "Waiting Approval" | "Ready to Start" | "In Progress" | "Completed";
+export type ProcessingStateFilter = "All" | "Waiting Approval" | "Ready to Start" | "In Progress" | "Completed" | "Rejected";
 
 export function lotTypeLabel(lot: Pick<CoffeeLot, "lotCategory" | "ownershipType" | "sourceGrn">): Exclude<StockTypeFilter, "All"> | "Other" {
   if (lot.lotCategory === "ARRIVAL") return "Arrival";
@@ -37,6 +37,7 @@ export function stockMatches(lot: CoffeeLot, type: StockTypeFilter, status: Stoc
 
 export function notificationTarget(label: string) {
   if (/approval/i.test(label)) return { view: "Approvals" };
+  if (/bag charge/i.test(label)) return { view: "Finance", financeTab: "Storage Review" as const };
   if (/agreement/i.test(label)) return { view: "Agreements" };
   if (/processing|allowance/i.test(label)) return { view: "Processing", processingState: "Waiting Approval" as ProcessingStateFilter };
   if (/invoice|unpaid/i.test(label)) return { view: "Finance" };

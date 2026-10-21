@@ -1,5 +1,5 @@
 begin;
-select plan(48);
+select plan(51);
 
 set local role authenticated;
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000004';
@@ -17,7 +17,7 @@ select is((select count(*)::integer from public.list_eligible_processing_lots('2
 select lives_ok($sql$
   select set_config(
     'test.request_id',
-    (public.create_processing_request(
+    (public.create_and_submit_processing_request(
       jsonb_build_object(
         'noteNumber', 'TEST-MULTI-001', 'requestDate', current_date::text,
         'clientId', '20000000-0000-0000-0000-000000000001',
@@ -38,17 +38,31 @@ select lives_ok($sql$
 $sql$, 'A same-client Arrival plus Reject plus Processed request is created');
 select is((select count(*)::integer from public.processing_request_lines where request_id = current_setting('test.request_id')::uuid), 3, 'The request stores three unique input lines');
 select is((select count(distinct lot.client_id)::integer from public.processing_request_lines line join public.coffee_lots lot on lot.id = line.lot_id where line.request_id = current_setting('test.request_id')::uuid), 1, 'All request inputs belong to one client');
-select lives_ok($sql$select public.transition_processing_request(current_setting('test.request_id')::uuid, 'SUBMITTED')$sql$, 'Multi-source request submits');
+select is((select status from public.processing_requests where id = current_setting('test.request_id')::uuid), 'SUBMITTED', 'Multi-source request submits automatically');
+select lives_ok(
+  $sql$select public.create_ecx_check(current_setting('test.request_id')::uuid, current_date, 'NOT_REQUIRED', null, 'Test inspector', 'Integration test exemption')$sql$,
+  'Multi-source request records an ECX decision before approval'
+);
 
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000002';
-select lives_ok($sql$select public.transition_processing_request(current_setting('test.request_id')::uuid, 'APPROVED')$sql$, 'Independent manager approves the request');
 select lives_ok($sql$
-  select set_config('test.order_id', (public.queue_processing_request(current_setting('test.request_id')::uuid) ->> 'id'), true)
-$sql$, 'Queueing atomically creates the processing order and reservations');
+  select set_config('test.order_id', (public.approve_and_queue_processing_request(current_setting('test.request_id')::uuid) ->> 'id'), true)
+$sql$, 'Independent manager approval atomically creates the order and reservations');
+select is((select status from public.processing_requests where id = current_setting('test.request_id')::uuid), 'APPROVED', 'The approved request has no approved-but-unqueued intermediate state');
 select is((select count(*)::integer from public.stock_reservations where processing_order_id = current_setting('test.order_id')::uuid and status = 'ACTIVE'), 3, 'Every source lot receives an active processing reservation');
 select is((select available_kg::numeric from public.list_eligible_processing_lots('20000000-0000-0000-0000-000000000001', 'ARRIVAL', 'HYK/GEL/2026/0043', 10)), 2400::numeric, 'Available stock excludes the processing reservation');
 
+reset role;
+insert into public.quantity_checks (
+  stage, reference_id, client_id, expected_kg, measured_kg, expected_bags, measured_bags,
+  evidence_reference, status, recorded_by, verified_by, verified_at
+)
+select 'PROCESSING_INTAKE', id, client_id, 1260, 1260, 21, 21,
+  'TEST-SCALE-001', 'APPROVED',
+  '10000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000002', now()
+from public.processing_orders where id = current_setting('test.order_id')::uuid;
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000004';
+set local role authenticated;
 select lives_ok($sql$
   select public.start_processing_order_with_intake(
     current_setting('test.order_id')::uuid,
@@ -65,6 +79,18 @@ select is((select count(*)::integer from public.stock_movements where reference_
 select is((select count(*)::integer from public.stock_reservations where processing_order_id = current_setting('test.order_id')::uuid and status = 'CONSUMED'), 3, 'Start consumes every processing reservation');
 select is((select count(*)::integer from public.processing_order_inputs input join public.coffee_lots lot on lot.id = input.lot_id where input.order_id = current_setting('test.order_id')::uuid and (abs(lot.quantity_kg - (select coalesce(sum(movement.quantity_kg), 0) from public.stock_movements movement where movement.lot_id = lot.id)) > 0.001 or lot.bag_count <> (select coalesce(sum(movement.bag_delta), 0) from public.stock_movements movement where movement.lot_id = lot.id))), 0, 'Cached source balances reconcile after multi-lot start');
 
+reset role;
+insert into public.quantity_checks (
+  stage, reference_id, client_id, expected_kg, measured_kg, expected_bags, measured_bags,
+  evidence_reference, payload, status, recorded_by, verified_by, verified_at
+)
+select 'PROCESSING_OUTPUT', id, client_id, 1260, 1230, 21, 20,
+  'TEST-SCALE-OUTPUT-001',
+  '{"lines":[{"category":"ACCEPTED_CLIENT_COFFEE","quantityKg":1150,"bagCount":19,"weighingReference":"TEST-OUT-001","warehouseSection":"P-TEST"},{"category":"CLIENT_REJECT","quantityKg":80,"bagCount":1,"weighingReference":"TEST-OUT-002","warehouseSection":"R-TEST"},{"category":"PROCESS_LOSS","quantityKg":30,"bagCount":0}]}'::jsonb,
+  'APPROVED', '10000000-0000-0000-0000-000000000004',
+  '10000000-0000-0000-0000-000000000002', now()
+from public.processing_orders where id = current_setting('test.order_id')::uuid;
+set local role authenticated;
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000002';
 select lives_ok($sql$
   select public.complete_processing_order_v2(
@@ -89,7 +115,7 @@ set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000004';
 select lives_ok($sql$
   select set_config(
     'test.request2_id',
-    (public.create_processing_request(
+    (public.create_and_submit_processing_request(
       jsonb_build_object('noteNumber', 'TEST-REPROCESS-002', 'requestDate', current_date::text, 'clientId', '20000000-0000-0000-0000-000000000001', 'clientName', 'Guji Specialty Coffee PLC', 'certifications', '[]'::jsonb, 'otherCertification', '', 'requester', 'Samuel Girma', 'checker', 'Hana Tesfaye', 'approver', 'Daniel Bekele', 'notes', 'Repeated processing test', 'scannedDocumentAttached', true),
       jsonb_build_array(
         jsonb_build_object('lotId', current_setting('test.processed_lot_id'), 'preparationType', 'Second processing', 'grade', 'Grade 1', 'requestedBags', 2, 'requestedKg', 100, 'certifications', '[]'::jsonb),
@@ -99,12 +125,38 @@ select lives_ok($sql$
   )
 $sql$, 'A second order can combine prior Processed and Reject output lots');
 select is((select count(*)::integer from public.processing_request_lines where request_id = current_setting('test.request2_id')::uuid), 2, 'Second request retains both repeated-processing sources');
-select lives_ok($sql$select public.transition_processing_request(current_setting('test.request2_id')::uuid, 'SUBMITTED')$sql$, 'Second request submits');
+select is((select status from public.processing_requests where id = current_setting('test.request2_id')::uuid), 'SUBMITTED', 'Second request submits automatically');
+select lives_ok(
+  $sql$select public.create_ecx_check(current_setting('test.request2_id')::uuid, current_date, 'NOT_REQUIRED', null, 'Test inspector', 'Integration test exemption')$sql$,
+  'Second request records an ECX decision before approval'
+);
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000002';
-select lives_ok($sql$select public.transition_processing_request(current_setting('test.request2_id')::uuid, 'APPROVED')$sql$, 'Second request is independently approved');
-select lives_ok($sql$select set_config('test.order2_id', (public.queue_processing_request(current_setting('test.request2_id')::uuid) ->> 'id'), true)$sql$, 'Second request reserves both output lots');
+select lives_ok($sql$select set_config('test.order2_id', (public.approve_and_queue_processing_request(current_setting('test.request2_id')::uuid) ->> 'id'), true)$sql$, 'Second request is independently approved and reserves both output lots');
+select is((select status from public.processing_requests where id = current_setting('test.request2_id')::uuid), 'APPROVED', 'Second approval and queueing complete atomically');
+reset role;
+insert into public.quantity_checks (
+  stage, reference_id, client_id, expected_kg, measured_kg, expected_bags, measured_bags,
+  evidence_reference, status, recorded_by, verified_by, verified_at
+)
+select 'PROCESSING_INTAKE', id, client_id, 150, 150, 3, 3,
+  'TEST-SCALE-002', 'APPROVED',
+  '10000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000002', now()
+from public.processing_orders where id = current_setting('test.order2_id')::uuid;
+set local role authenticated;
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000004';
 select lives_ok($sql$select public.start_processing_order_with_intake(current_setting('test.order2_id')::uuid, jsonb_build_object('intakeAt', now()::text, 'inputBags', 3, 'inputKg', 150, 'scaleReference', 'TEST-SCALE-002', 'warehouseIssueReference', 'TEST-WI-002', 'machineLine', 'Test line', 'shiftName', 'Day', 'clientMonitorPresent', false, 'clientMonitorName', '', 'intakeCondition', 'Good', 'evidencePath', 'TEST-EVIDENCE-002'))$sql$, 'Second processing consumes Processed and Reject lots');
+reset role;
+insert into public.quantity_checks (
+  stage, reference_id, client_id, expected_kg, measured_kg, expected_bags, measured_bags,
+  evidence_reference, payload, status, recorded_by, verified_by, verified_at
+)
+select 'PROCESSING_OUTPUT', id, client_id, 150, 146.25, 3, 3,
+  'TEST-SCALE-OUTPUT-002',
+  '{"lines":[{"category":"ACCEPTED_CLIENT_COFFEE","quantityKg":126.25,"bagCount":2,"weighingReference":"TEST-OUT-003","warehouseSection":"P-TEST-2"},{"category":"CLIENT_REJECT","quantityKg":20,"bagCount":1,"weighingReference":"TEST-OUT-004","warehouseSection":"R-TEST-2"},{"category":"PROCESS_LOSS","quantityKg":3.75,"bagCount":0}]}'::jsonb,
+  'APPROVED', '10000000-0000-0000-0000-000000000004',
+  '10000000-0000-0000-0000-000000000002', now()
+from public.processing_orders where id = current_setting('test.order2_id')::uuid;
+set local role authenticated;
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000002';
 select lives_ok($sql$select public.complete_processing_order_v2(current_setting('test.order2_id')::uuid, jsonb_build_array(jsonb_build_object('category', 'ACCEPTED_CLIENT_COFFEE', 'coffeeType', 'UNWASHED_UG', 'grade', 'Grade 1', 'preparation', 'Second processed', 'bagCount', 2, 'bagWeightKg', 60, 'quantityKg', 126.25, 'warehouseSection', 'P-TEST-2', 'certifications', '[]'::jsonb, 'weighingReference', 'TEST-OUT-003', 'evidencePath', '', 'reason', ''), jsonb_build_object('category', 'CLIENT_REJECT', 'coffeeType', 'UNWASHED_UG', 'grade', 'Reject', 'preparation', 'Separated', 'bagCount', 1, 'bagWeightKg', 20, 'quantityKg', 20, 'warehouseSection', 'R-TEST-2', 'certifications', '[]'::jsonb, 'weighingReference', 'TEST-OUT-004', 'evidencePath', '', 'reason', 'Reusable reject'), jsonb_build_object('category', 'PROCESS_LOSS', 'quantityKg', 3.75, 'bagCount', 0, 'certifications', '[]'::jsonb, 'reason', 'Measured loss')), 'Measured loss', null, false)$sql$, 'Repeated processing completes within the existing tolerance');
 select set_config('test.final_lot_id', (select child_lot_id::text from public.processing_outputs where order_id = current_setting('test.order2_id')::uuid and category = 'ACCEPTED_CLIENT_COFFEE'), true);
@@ -116,7 +168,7 @@ set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000004';
 select lives_ok($sql$
   select set_config(
     'test.rollback_request_id',
-    (public.create_processing_request(
+    (public.create_and_submit_processing_request(
       jsonb_build_object('noteNumber', 'TEST-ROLLBACK-003', 'requestDate', current_date::text, 'clientId', '20000000-0000-0000-0000-000000000001', 'clientName', 'Guji Specialty Coffee PLC', 'certifications', '[]'::jsonb, 'otherCertification', '', 'requester', 'Samuel Girma', 'checker', 'Hana Tesfaye', 'approver', 'Daniel Bekele', 'notes', 'Atomic failure rollback test', 'scannedDocumentAttached', true),
       jsonb_build_array(
         jsonb_build_object('lotId', '60000000-0000-0000-0000-000000000004', 'preparationType', 'Rollback proof', 'grade', 'Grade 1', 'requestedBags', 2, 'requestedKg', 100, 'certifications', '[]'::jsonb),
@@ -125,11 +177,23 @@ select lives_ok($sql$
     ) ->> 'id'), true
   )
 $sql$, 'A two-lot request is created for the atomic rollback proof');
-select lives_ok($sql$select public.transition_processing_request(current_setting('test.rollback_request_id')::uuid, 'SUBMITTED')$sql$, 'Rollback-proof request submits');
+select is((select status from public.processing_requests where id = current_setting('test.rollback_request_id')::uuid), 'SUBMITTED', 'Rollback-proof request submits automatically');
+select lives_ok(
+  $sql$select public.create_ecx_check(current_setting('test.rollback_request_id')::uuid, current_date, 'NOT_REQUIRED', null, 'Test inspector', 'Integration test exemption')$sql$,
+  'Rollback-proof request records an ECX decision before approval'
+);
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000002';
-select lives_ok($sql$select public.transition_processing_request(current_setting('test.rollback_request_id')::uuid, 'APPROVED')$sql$, 'Rollback-proof request is approved');
-select lives_ok($sql$select set_config('test.rollback_order_id', (public.queue_processing_request(current_setting('test.rollback_request_id')::uuid) ->> 'id'), true)$sql$, 'Rollback-proof order reserves both lots');
+select lives_ok($sql$select set_config('test.rollback_order_id', (public.approve_and_queue_processing_request(current_setting('test.rollback_request_id')::uuid) ->> 'id'), true)$sql$, 'Rollback-proof request is approved and reserves both lots atomically');
+select is((select status from public.processing_requests where id = current_setting('test.rollback_request_id')::uuid), 'APPROVED', 'Rollback-proof approval has a queued order');
 reset role;
+insert into public.quantity_checks (
+  stage, reference_id, client_id, expected_kg, measured_kg, expected_bags, measured_bags,
+  evidence_reference, status, recorded_by, verified_by, verified_at
+)
+select 'PROCESSING_INTAKE', id, client_id, 200, 200, 4, 4,
+  'TEST-SCALE-ROLLBACK', 'APPROVED',
+  '10000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000002', now()
+from public.processing_orders where id = current_setting('test.rollback_order_id')::uuid;
 update public.stock_reservations
 set status = 'RELEASED', released_at = now()
 where processing_order_id = current_setting('test.rollback_order_id')::uuid
