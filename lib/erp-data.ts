@@ -3,7 +3,6 @@ import { activeOn, clientReadiness } from "@/app/client-onboarding";
 import type { CoffeeLot, StockMovement, WarehouseReceipt } from "@/app/grn-workflow";
 import type { ProcessingOutputLine, ProcessingRequest, ProcessingRequestLine } from "@/app/processing-workflow";
 import { countLabel } from "./ui-format";
-import { laboratoryDatabaseEnabled } from "./laboratory-config";
 
 type DbError = { message: string; code?: string } | null;
 
@@ -681,7 +680,16 @@ export async function receiveEcxTransfer(input: { transferId: string; receivedKg
 export type InvoiceRow = { id: string; invoice_number: string; client_id: string; tariff_version: string; subtotal_etb: number; tax_etb: number; total_etb: number; status: string; issued_on: string | null; due_on: string | null; created_at: string; line_snapshot: { service_event_id?: string; service_type?: string; description: string; quantity: number; rate_etb: number; amount_etb?: number; reference_id?: string | null; reference_type?: string | null }[] };
 export type PaymentRow = { id: string; payment_number: string; invoice_id: string; client_id: string; amount_etb: number; bank_reference: string; paid_at: string; direction: string; payment_method: string; payer_name: string | null; financial_institution: string | null; payment_note: string | null };
 export type ServiceEventRow = { id: string; client_id: string; service_type: string; description: string; quantity: number; unit_price: number; total_amount: number; reference_id: string | null; reference_type: string | null; service_date: string; unit_label: string; invoice_id: string | null; status: string; created_at: string };
-export type StorageRentRecordRow = { id: string; rent_number: string; client_id: string; lot_id: string; storage_category: string; charge_start_on: string; billed_through_on: string | null; status: string; evidence_reference: string | null; note: string | null; recorded_by: string; created_at: string; updated_at: string };
+export type StorageRentRecordRow = { id: string; rent_number: string; client_id: string; lot_id: string; storage_category: string; charge_start_on: string; billed_through_on: string | null; status: string; evidence_reference: string | null; note: string | null; recorded_by: string; created_at: string; updated_at: string; tariff_version?: string; bag_weight_kg?: number; category_start_on?: string };
+export type RentOverviewRow = {
+  lotId: string; lotNumber: string; clientId: string; quantityKg: number; bags: number;
+  parentLotId: string | null; rentId: string | null; category: string | null; categoryStart: string | null;
+  tariffVersion: string | null; bagWeightKg: number | null; billedThrough: string | null;
+  nextUnbilled: string | null; accrued: number | null; today: StorageQuoteRow | null;
+  freeUntil: string | null; inherited: boolean; error: string | null;
+};
+export type BillingServiceRate = { id: string; tariff_version_id: string; service_code: string; description: string; unit_label: string; unit_price: number; effective_from: string; effective_to: string | null; active: boolean };
+export type PriceServiceDraft = Pick<BillingServiceRate, "service_code" | "description" | "unit_label" | "unit_price">;
 export type TariffLineItemRow = { id: string; tariff_version_id: string; category: string; age_start_days: number; age_end_days: number | null; daily_rate_per_unit: number; certified: boolean; source_clause: string | null; source_pdf_page: number | null };
 export type StorageQuoteRow = { date: string; openingBags: number; movementBags: number; closingBags: number; openingKg: number; movementKg: number; closingKg: number; ageDay: number; rate: number; units: number; amount: number; references: string[] };
 export type StorageQuote = { tariffVersion: string; billingBasis: "EQUIVALENT_BAG_FROM_KG" | "FIFTY_EMPTY_BAGS"; bagWeightKg: number; duplicateKey: string; billableBagDays: number; amount: number; rows: StorageQuoteRow[] };
@@ -691,27 +699,40 @@ export type FinanceData = {
   clients: ClientRow[];
   lots: (LotRow & { received_at: string })[];
   movements: { lot_id: string; bag_delta: number; occurred_at: string; reference_type: string }[];
-  tariffs: { id: string; version_code: string; description: string | null; effective_from: string; effective_to: string | null; active: boolean; verified_by_1: string | null; verified_by_2: string | null }[];
+  tariffs: { id: string; version_code: string; description: string | null; effective_from: string; effective_to: string | null; active: boolean; verified_by_1: string | null; verified_by_2: string | null; invoice_tax_rate: number | null; service_rate_draft: PriceServiceDraft[] }[];
   tariffLineItems: TariffLineItemRow[];
   storageRuns: { id: string; duplicate_key: string; client_id: string; lot_id: string; storage_rent_record_id: string | null; run_number: string; total_amount: number; status: string }[];
   storageRentRecords: StorageRentRecordRow[];
   serviceEvents: ServiceEventRow[];
+  rentOverview: RentOverviewRow[];
+  serviceRates: BillingServiceRate[];
+  agreements: AgreementRow[];
+  profiles: ProfileRow[];
+  currentUserId: string;
+  processingOrders: WarehouseControlData["processingOrders"];
+  receipts: { id: string; agreement_id: string }[];
 };
 
 export async function loadFinanceData(): Promise<FinanceData> {
   const db = createSupabaseClient();
-  const [invoiceResult, paymentResult, clientResult, lotResult, receiptResult, movementResult, tariffResult, tariffLineResult, storageRunResult, storageRentResult, serviceEventResult] = await Promise.all([
+  const [invoiceResult, paymentResult, clientResult, lotResult, receiptResult, movementResult, tariffResult, tariffLineResult, storageRunResult, storageRentResult, serviceEventResult, overviewResult, serviceRatesResult, agreementsResult, profilesResult, userId, ordersResult] = await Promise.all([
     db.from("invoices").select("id,invoice_number,client_id,tariff_version,subtotal_etb,tax_etb,total_etb,status,issued_on,due_on,created_at,line_snapshot").order("created_at", { ascending: false }),
     db.from("payments").select("id,payment_number,invoice_id,client_id,amount_etb,bank_reference,paid_at,direction,payment_method,payer_name,financial_institution,payment_note").order("paid_at", { ascending: false }),
     db.from("clients").select("id,code,legal_name,tin,phone,email,active").order("legal_name"),
     db.from("coffee_lots").select("id,lot_number,receipt_id,client_id,coffee_type,bag_count,quantity_kg,section,status,certification_status,certification_schemes,certificate_number,certification_issuer,certification_valid_from,certification_valid_to").order("lot_number"),
-    db.from("warehouse_receipts").select("id,arrival_at"),
+    db.from("warehouse_receipts").select("id,arrival_at,agreement_id"),
     db.from("stock_movements").select("lot_id,bag_delta,occurred_at,reference_type").order("occurred_at"),
-    db.from("tariff_versions").select("id,version_code,description,effective_from,effective_to,active,verified_by_1,verified_by_2").order("effective_from", { ascending: false }),
+    db.from("tariff_versions").select("id,version_code,description,effective_from,effective_to,active,verified_by_1,verified_by_2,invoice_tax_rate,service_rate_draft").order("effective_from", { ascending: false }),
     db.from("tariff_line_items").select("id,tariff_version_id,category,age_start_days,age_end_days,daily_rate_per_unit,certified,source_clause,source_pdf_page").order("category").order("age_start_days"),
     db.from("storage_billing_runs").select("id,duplicate_key,client_id,lot_id,storage_rent_record_id,run_number,total_amount,status").order("created_at", { ascending: false }),
-    db.from("storage_rent_records").select("id,rent_number,client_id,lot_id,storage_category,charge_start_on,billed_through_on,status,evidence_reference,note,recorded_by,created_at,updated_at").order("created_at", { ascending: false }),
+    db.from("storage_rent_records").select("id,rent_number,client_id,lot_id,storage_category,charge_start_on,billed_through_on,status,evidence_reference,note,recorded_by,created_at,updated_at,tariff_version,bag_weight_kg,category_start_on").order("created_at", { ascending: false }),
     db.from("service_events").select("id,client_id,service_type,description,quantity,unit_price,total_amount,reference_id,reference_type,service_date,unit_label,invoice_id,status,created_at").order("created_at", { ascending: false }),
+    db.rpc("billing_rent_overview"),
+    db.from("service_rate_catalog").select("id,tariff_version_id,service_code,description,unit_label,unit_price,effective_from,effective_to,active").order("description"),
+    db.from("agreements").select("id,client_id,agreement_number,effective_from,effective_to,tariff_version,default_bag_weight_kg,status").order("effective_from", { ascending: false }),
+    db.from("profiles").select("id,full_name,role,active").eq("active", true),
+    currentUserId(),
+    db.from("processing_orders").select("id,order_number,client_id,lot_id,status").eq("status", "POSTED"),
   ]);
   const receiptDates = new Map((receiptResult.data ?? []).map((item) => [item.id, item.arrival_at]));
   return {
@@ -725,6 +746,13 @@ export async function loadFinanceData(): Promise<FinanceData> {
     storageRuns: result(storageRunResult.data as FinanceData["storageRuns"] | null, storageRunResult.error),
     storageRentRecords: result(storageRentResult.data as StorageRentRecordRow[] | null, storageRentResult.error),
     serviceEvents: result(serviceEventResult.data as ServiceEventRow[] | null, serviceEventResult.error),
+    rentOverview: result(overviewResult.data as RentOverviewRow[] | null, overviewResult.error),
+    serviceRates: result(serviceRatesResult.data as BillingServiceRate[] | null, serviceRatesResult.error),
+    agreements: result(agreementsResult.data as AgreementRow[] | null, agreementsResult.error),
+    profiles: result(profilesResult.data as ProfileRow[] | null, profilesResult.error),
+    currentUserId: userId,
+    receipts: result(receiptResult.data as FinanceData["receipts"] | null, receiptResult.error),
+    processingOrders: result(ordersResult.data as WarehouseControlData["processingOrders"] | null, ordersResult.error),
   };
 }
 
@@ -777,7 +805,7 @@ export async function loadManagementData() {
     db.from("clients").select("id,code,legal_name"),
     db.from("arrears_cases").select("id,case_number,client_id,invoice_id,stage,outstanding_etb,opened_on,oldest_due_on,next_action_on,assigned_to,notes,closed_at,created_at,updated_at").order("created_at", { ascending: false }),
     db.from("arrears_case_events").select("id,case_id,from_stage,to_stage,note,action_by,created_at").order("created_at", { ascending: false }),
-    laboratoryDatabaseEnabled ? db.from("lab_samples").select("id,sample_code") : Promise.resolve({ data: [] as { id: string; sample_code: string }[] }),
+    db.from("lab_samples").select("id,sample_code"),
     db.rpc("list_admin_users"),
   ]);
   const references = new Map<string, string>();
@@ -906,7 +934,7 @@ export async function loadOperationalReport(title: string) {
   return [headers.map(escape).join(","), ...rows.map((row) => headers.map((header) => escape(row[header])).join(","))].join("\n");
 }
 
-export type ReportType = "Stock" | "Receipts" | "Processing" | "Dispatch" | "Billing" | "Storage Loss" | "Bags" | "Labour" | "Generator" | "Arrears" | "Documents" | "Audit";
+export type ReportType = "Stock" | "Receipts" | "Processing" | "Dispatch" | "Quantity Issues" | "Billing" | "Storage Loss" | "Bags" | "Labour" | "Generator" | "Arrears" | "Documents" | "Audit";
 export type ReportTable = { columns: string[]; rows: { id: string; clientId: string; date: string; values: string[] }[] };
 
 export async function loadReportTable(type: ReportType, filters: { from: string; to: string; clientId: string }): Promise<ReportTable> {
@@ -945,6 +973,63 @@ export async function loadReportTable(type: ReportType, filters: { from: string;
     const { data, error } = await query;
     const rows = result(data, error) as { id: string; order_number: string; completion_number: string | null; client_id: string; created_at: string; input_kg: number; accepted_client_kg: number; client_reject_kg: number; process_loss_kg: number; status: string }[];
     return { columns: ["Date", "Order", "Client", "Input KG", "Processed KG", "Reject KG", "Loss KG", "Status"], rows: rows.map((row) => ({ id: row.id, clientId: row.client_id, date: row.created_at.slice(0, 10), values: [row.created_at.slice(0, 10), row.completion_number ?? row.order_number, clientName(row.client_id), Number(row.input_kg).toLocaleString(), Number(row.accepted_client_kg).toLocaleString(), Number(row.client_reject_kg).toLocaleString(), Number(row.process_loss_kg).toLocaleString(), row.status.replaceAll("_", " ")] })) };
+  }
+
+  if (type === "Quantity Issues") {
+    let checksQuery = db.from("quantity_checks")
+      .select("stage,client_id,expected_kg,measured_kg,expected_bags,measured_bags,status,recorded_at");
+    let jobsQuery = db.from("coffee_transform_jobs").select("job_type,client_id,status,created_at");
+    if (filters.from) {
+      checksQuery = checksQuery.gte("recorded_at", `${filters.from}T00:00:00`);
+      jobsQuery = jobsQuery.gte("created_at", `${filters.from}T00:00:00`);
+    }
+    if (filters.to) {
+      checksQuery = checksQuery.lte("recorded_at", `${filters.to}T23:59:59`);
+      jobsQuery = jobsQuery.lte("created_at", `${filters.to}T23:59:59`);
+    }
+    if (filters.clientId) {
+      checksQuery = checksQuery.eq("client_id", filters.clientId);
+      jobsQuery = jobsQuery.eq("client_id", filters.clientId);
+    }
+    const [checkResult, jobResult] = await Promise.all([checksQuery, jobsQuery]);
+    const checks = result(checkResult.data, checkResult.error);
+    const jobs = result(jobResult.data, jobResult.error);
+    const labels = [
+      ["ARRIVAL", "Receiving"], ["PROCESSING_INTAKE", "Processing intake"],
+      ["PROCESSING_OUTPUT", "Processing output"], ["DISPATCH_EXIT", "Dispatch exit"],
+      ["REBAG", "Rebagging"], ["BLEND", "Blending (ሳቢያ)"],
+    ] as const;
+    const summary = new Map(labels.map(([key, label]) => [key, {
+      key, label, checked: 0, issues: 0, shortageKg: 0, overageKg: 0, pending: 0,
+    }]));
+    for (const check of checks) {
+      const row = summary.get(check.stage);
+      if (!row) continue;
+      const kgDifference = Number(check.expected_kg) - Number(check.measured_kg);
+      const bagDifference = check.stage !== "PROCESSING_OUTPUT" && check.expected_bags !== check.measured_bags;
+      row.checked += 1;
+      if (Math.abs(kgDifference) > 0.0005 || bagDifference) row.issues += 1;
+      row.shortageKg += Math.max(kgDifference, 0);
+      row.overageKg += Math.max(-kgDifference, 0);
+      if (check.status === "PENDING") row.pending += 1;
+    }
+    for (const job of jobs) {
+      const row = summary.get(job.job_type);
+      if (!row) continue;
+      row.checked += 1;
+      if (job.status === "REJECTED") row.issues += 1;
+      if (job.status === "PENDING") row.pending += 1;
+    }
+    return {
+      columns: ["Service", "Checks / jobs", "Differences / rejected", "Shortage KG", "Overage KG", "Awaiting review", "Issue rate"],
+      rows: [...summary.values()].sort((a, b) => b.issues - a.issues || b.shortageKg - a.shortageKg)
+        .map((row) => ({ id: row.key, clientId: "", date: "", values: [
+          row.label, String(row.checked), String(row.issues),
+          Number(row.shortageKg.toFixed(3)).toLocaleString(),
+          Number(row.overageKg.toFixed(3)).toLocaleString(), String(row.pending),
+          row.checked ? `${Math.round(row.issues / row.checked * 100)}%` : "—",
+        ] })),
+    };
   }
 
   if (type === "Dispatch") {
@@ -1434,4 +1519,28 @@ export async function validateProcessingSourceLot(lotId: string, clientId: strin
   });
   if (error) throw new Error(friendlyDatabaseError(error, "Source lot validation failed."));
   return Boolean(data);
+}
+
+
+export async function createBillingPriceVersion(input: { sourceId: string; code: string; effectiveFrom: string; storagePrices: Record<string, number>; services: PriceServiceDraft[]; taxRate: number | null }) {
+  const { data, error } = await createSupabaseClient().rpc("create_billing_price_version", {
+    p_source_id: input.sourceId, p_code: input.code, p_effective_from: input.effectiveFrom,
+    p_storage_prices: input.storagePrices, p_services: input.services, p_tax_rate: input.taxRate,
+  });
+  if (error) throw new Error(error.message);
+  return data as string;
+}
+
+export async function issuePreparedInvoice(invoiceId: string, dueOn: string) {
+  const { data, error } = await createSupabaseClient().rpc("issue_prepared_invoice", { p_invoice_id: invoiceId, p_due_on: dueOn });
+  if (error) throw new Error(error.message);
+  return data as { id: string; status: string };
+}
+
+export async function loadRentCalculation(runId: string) {
+  const { data, error } = await createSupabaseClient().from("storage_billing_run_days")
+    .select("charge_date,closing_kg,billable_units,rate_etb,amount_etb,bag_weight_kg,movement_references")
+    .eq("run_id", runId).order("charge_date");
+  if (error) throw new Error(error.message);
+  return data as { charge_date: string; closing_kg: number; billable_units: number; rate_etb: number; amount_etb: number; bag_weight_kg: number; movement_references: string[] }[];
 }

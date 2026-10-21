@@ -46,6 +46,7 @@ import {
   RecordDetailDrawer,
 } from "./workflow-ui";
 import { daysOverdue } from "./ux-rules";
+import { OperationalApprovalQueue } from "./operational-approval-queue";
 
 export const managementViews = [
   "Arrears Cases",
@@ -716,6 +717,7 @@ export function ManagementOperations({
                 "Receipts",
                 "Processing",
                 "Dispatch",
+                "Quantity Issues",
                 "Billing",
                 "Storage Loss",
                 "Bags",
@@ -737,7 +739,9 @@ export function ManagementOperations({
               >
                 {type}
                 <small>
-                  {type === "Bags"
+                  {type === "Quantity Issues"
+                    ? "Difference ranking"
+                    : type === "Bags"
                     ? "Client-owned bags"
                     : type === "Generator"
                       ? "Generator requests"
@@ -780,6 +784,7 @@ export function ManagementOperations({
                     "Receipts",
                     "Processing",
                     "Dispatch",
+                    "Quantity Issues",
                     "Billing",
                     "Storage Loss",
                     "Bags",
@@ -838,7 +843,7 @@ export function ManagementOperations({
                 <p>
                   {reportLoading
                     ? "Loading database records..."
-                    : `${filteredReportRows.length} record${filteredReportRows.length === 1 ? "" : "s"} with the current filters`}
+                    : `${filteredReportRows.length} ${reportType === "Quantity Issues" ? "services" : `record${filteredReportRows.length === 1 ? "" : "s"}`} with the current filters`}
                 </p>
               </div>
               <div className="no-print">
@@ -861,6 +866,7 @@ export function ManagementOperations({
                 </button>
               </div>
             </header>
+            {reportType === "Quantity Issues" && <p className="form-note">Ranked by recorded differences or rejected jobs. Processing output shortage includes classified process loss, which may be within the agreed allowance. Rebagging and blending issues count rejected jobs.</p>}
             <div className="report-table-scroll">
               <div
                 className="dynamic-report-table"
@@ -877,12 +883,13 @@ export function ManagementOperations({
                 </div>
                 {filteredReportRows.map((row) => (
                   <div
-                    className="clickable-row"
-                    role="button"
-                    tabIndex={0}
+                    className={reportType === "Quantity Issues" ? "" : "clickable-row"}
+                    role={reportType === "Quantity Issues" ? undefined : "button"}
+                    tabIndex={reportType === "Quantity Issues" ? undefined : 0}
                     key={row.id}
-                    onClick={() => setSelectedReportRowId(row.id)}
+                    onClick={() => { if (reportType !== "Quantity Issues") setSelectedReportRowId(row.id); }}
                     onKeyDown={(event) => {
+                      if (reportType === "Quantity Issues") return;
                       if (event.key === "Enter" || event.key === " ")
                         setSelectedReportRowId(row.id);
                     }}
@@ -933,7 +940,7 @@ export function ManagementOperations({
                 <option value="PAYMENT_SLIP">Payment slip</option>
                 <option value="DISPATCH_RELEASE">Dispatch release</option>
                 <option value="CREDIT_APPROVAL">Credit approval</option>
-                {process.env.NEXT_PUBLIC_LAB_DATABASE_ENABLED === "true" && <option value="LAB_SOURCE_EVIDENCE">Laboratory source evidence</option>}
+                <option value="LAB_SOURCE_EVIDENCE">Laboratory source evidence</option>
                 <option value="SUPPORTING_DOCUMENT">Supporting document</option>
               </select>
             </label>
@@ -1008,6 +1015,7 @@ export function ManagementOperations({
 
       {activeView === "Approvals" && (
         <>
+          <OperationalApprovalQueue />
           <div className="document-rule">
             <ShieldCheck size={19} />
             <div>
