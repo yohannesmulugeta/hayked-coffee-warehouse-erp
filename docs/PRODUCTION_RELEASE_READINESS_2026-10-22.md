@@ -20,6 +20,7 @@ Status: **HOLD**. No production code, data, or migration has been changed by thi
   - `20261021204848_clarify_empty_bag_function_volatility.sql`
   - `20261021204917_clarify_empty_bag_quote_volatility.sql`
 - A read-only production schema dump confirms that the earlier processing approval columns and billing workspace columns are absent. The two older migrations must be tested in a copied database before applying them after newer migrations. The schema dump is kept only under the ignored local `tmp/` directory.
+- The pending processing migration makes ECX results optional for approval and start. The current UI and SQL tests expect this, but the former production gate described ECX as required. Warehouse management must confirm the policy before release.
 
 ## Required before production
 

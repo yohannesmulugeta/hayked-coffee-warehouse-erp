@@ -9,7 +9,7 @@ This checklist covers operational correctness, data integrity, deployment readin
 - The configured-database UI stops showing sample stock, finance, and activity values when the database is unavailable.
 - Application views and master-data actions are filtered by an explicit role matrix; unknown roles fail closed to viewer access.
 - Dispatch posting checks line totals, reservations, ownership, primary lot, stock quantity, and duplicate lines inside one database transaction.
-- Processing cannot enter `IN_PROCESS` without an approved request and an ECX result of `PASSED` or `NOT_REQUIRED`.
+- Processing cannot enter `IN_PROCESS` without an approved request and an approved physical intake check. The current application and database tests treat ECX information as optional.
 - Storage billing cannot enter `INVOICED` without daily evidence that exactly reconciles its bag-days and amount.
 - Manual service posting uses a database-approved, independently reviewed rate. The browser cannot choose or override the price.
 - Unapproved labour, bag-printing, generator, and other service rates cannot be prepared for invoicing.
@@ -28,6 +28,7 @@ This checklist covers operational correctness, data integrity, deployment readin
 | Empty client-owned bag storage (Article 16) | Warehouse + finance | Reconciled opening counts; verify the signed tariff version, effective dates, and tax mapping against the contract before loading rates | BLOCKED |
 | Article 16.4 exception | Management + finance | Confirm the exact Amharic trigger and supporting notice/evidence; approve each case independently before posting the ETB 100/day charge | BLOCKED |
 | Washed Grade 3–5 processing | Management + finance | Approve a signed processing price mapping before those grades can be charged | BLOCKED |
+| Optional ECX processing check | Warehouse management | Confirm that an approved processing request may start without an ECX result; the current UI and pending migration allow this | BLOCKED |
 | Dispatch `DSP-2026-0018` | Warehouse manager | Cancel it or rebuild its lines/reservations so header, lines, ownership, and stock agree | BLOCKED |
 | Storage run `SBR-2026-0008` | Finance + warehouse manager | Supply reconciled daily storage evidence or reverse/correct the legacy invoiced state through an approved migration | BLOCKED |
 
