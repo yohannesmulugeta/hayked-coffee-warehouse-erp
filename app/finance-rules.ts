@@ -1,5 +1,12 @@
 export type StorageCategory = "NO_PROCESSING" | "WAITING_PROCESSING" | "PROCESSED_EXPORT" | "GRADE_IMPROVEMENT" | "REJECT" | "EMPTY_BAGS";
 
+/** Warehouse business dates must not change with the operator's browser timezone. */
+export function billingDate(offsetDays = 0, now = new Date()) {
+  const local = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+  local.setUTCDate(local.getUTCDate() + offsetDays);
+  return local.toISOString().slice(0, 10);
+}
+
 export function invoiceSnapshot(lines: Array<{ description: string; quantity: number; unitPrice: number }>, taxRate: number) {
   const items = lines.map((line) => ({ ...line, lineTotal: Math.round(line.quantity * line.unitPrice * 100) / 100 }));
   const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);

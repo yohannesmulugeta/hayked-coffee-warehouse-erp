@@ -696,11 +696,14 @@ export type FinanceData = {
   storageRuns: { id: string; duplicate_key: string; client_id: string; lot_id: string; storage_rent_record_id: string | null; run_number: string; total_amount: number; status: string }[];
   storageRentRecords: StorageRentRecordRow[];
   serviceEvents: ServiceEventRow[];
+  agreements: AgreementRow[];
+  profiles: ProfileRow[];
+  currentUserId: string;
 };
 
 export async function loadFinanceData(): Promise<FinanceData> {
   const db = createSupabaseClient();
-  const [invoiceResult, paymentResult, clientResult, lotResult, receiptResult, movementResult, tariffResult, tariffLineResult, storageRunResult, storageRentResult, serviceEventResult] = await Promise.all([
+  const [invoiceResult, paymentResult, clientResult, lotResult, receiptResult, movementResult, tariffResult, tariffLineResult, storageRunResult, storageRentResult, serviceEventResult, agreementResult, profileResult, userId] = await Promise.all([
     db.from("invoices").select("id,invoice_number,client_id,tariff_version,subtotal_etb,tax_etb,total_etb,status,issued_on,due_on,created_at,line_snapshot").order("created_at", { ascending: false }),
     db.from("payments").select("id,payment_number,invoice_id,client_id,amount_etb,bank_reference,paid_at,direction,payment_method,payer_name,financial_institution,payment_note").order("paid_at", { ascending: false }),
     db.from("clients").select("id,code,legal_name,tin,phone,email,active").order("legal_name"),
@@ -712,6 +715,9 @@ export async function loadFinanceData(): Promise<FinanceData> {
     db.from("storage_billing_runs").select("id,duplicate_key,client_id,lot_id,storage_rent_record_id,run_number,total_amount,status").order("created_at", { ascending: false }),
     db.from("storage_rent_records").select("id,rent_number,client_id,lot_id,storage_category,charge_start_on,billed_through_on,status,evidence_reference,note,recorded_by,created_at,updated_at").order("created_at", { ascending: false }),
     db.from("service_events").select("id,client_id,service_type,description,quantity,unit_price,total_amount,reference_id,reference_type,service_date,unit_label,invoice_id,status,created_at").order("created_at", { ascending: false }),
+    db.from("agreements").select("id,client_id,agreement_number,effective_from,effective_to,tariff_version,default_bag_weight_kg,status").order("effective_from", { ascending: false }),
+    db.from("profiles").select("id,full_name,role,active").eq("active", true),
+    currentUserId(),
   ]);
   const receiptDates = new Map((receiptResult.data ?? []).map((item) => [item.id, item.arrival_at]));
   return {
@@ -725,6 +731,9 @@ export async function loadFinanceData(): Promise<FinanceData> {
     storageRuns: result(storageRunResult.data as FinanceData["storageRuns"] | null, storageRunResult.error),
     storageRentRecords: result(storageRentResult.data as StorageRentRecordRow[] | null, storageRentResult.error),
     serviceEvents: result(serviceEventResult.data as ServiceEventRow[] | null, serviceEventResult.error),
+    agreements: result(agreementResult.data as AgreementRow[] | null, agreementResult.error),
+    profiles: result(profileResult.data as ProfileRow[] | null, profileResult.error),
+    currentUserId: userId,
   };
 }
 

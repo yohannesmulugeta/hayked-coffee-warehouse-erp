@@ -35,6 +35,7 @@ import {
   type WarehouseControlData,
 } from "@/lib/erp-data";
 import { EvidenceUploader } from "./workflow-ui";
+import { EmptyBagControl } from "./empty-bag-control";
 
 export const warehouseControlViews = [
   "Storage Loss",
@@ -934,6 +935,8 @@ export function WarehouseControls({
           copy="Bag ownership and movements remain separate from coffee stock."
         />
         {notice}
+        <EmptyBagControl />
+        <h2 className="bag-printing-heading">Bag printing</h2>
         <section className="bag-summary">
           <article>
             <Archive size={19} />
@@ -1102,7 +1105,7 @@ export function WarehouseControls({
                   <label>Client<select required value={rentClientId} onChange={(event) => { setRentClientId(event.target.value); setRentLotId(""); }}><option value="" disabled>Select client</option>{clients.map((item) => <option key={item.id} value={item.id}>{item.code} - {item.legal_name}</option>)}</select></label>
                   <label>Coffee lot<select required value={rentLotId} disabled={!rentClientId} onChange={(event) => setRentLotId(event.target.value)}><option value="">{rentClientId ? "Select an unrecorded active lot" : "Select client first"}</option>{rentLots.map((item) => <option key={item.id} value={item.id}>{item.lot_number} - {Number(item.bag_count).toLocaleString()} bags</option>)}</select></label>
                   <label>Charge start date<input type="date" required max={new Date().toISOString().slice(0, 10)} value={rentStartOn} onChange={(event) => setRentStartOn(event.target.value)} /></label>
-                  <label>Storage category<select value={rentCategory} onChange={(event) => setRentCategory(event.target.value)}><option value="NO_PROCESSING">Stored without processing</option><option value="WAITING_PROCESSING">Waiting for processing</option><option value="PROCESSED_EXPORT">Processed export</option><option value="GRADE_IMPROVEMENT">Grade improvement</option><option value="REJECT">Reject coffee</option><option value="EMPTY_BAGS">Empty bags</option></select></label>
+                  <label>Storage category<select value={rentCategory} onChange={(event) => setRentCategory(event.target.value)}><option value="NO_PROCESSING">Stored without processing</option><option value="WAITING_PROCESSING">Waiting for processing</option><option value="PROCESSED_EXPORT">Processed export</option><option value="GRADE_IMPROVEMENT">Grade improvement</option><option value="REJECT">Reject coffee</option></select></label>
                   <label>Evidence reference<input value={rentEvidenceReference} onChange={(event) => setRentEvidenceReference(event.target.value)} placeholder="Storage instruction or client request" /></label>
                   <label className="wide">Note<textarea rows={2} value={rentNote} onChange={(event) => setRentNote(event.target.value)} placeholder="Optional operational note" /></label>
                 </div>

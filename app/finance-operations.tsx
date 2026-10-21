@@ -34,6 +34,7 @@ import {
   RecordDetailDrawer,
   WorkflowGuide,
 } from "./workflow-ui";
+import { EmptyBagBilling, SavedBagChargeCalculation } from "./empty-bag-billing";
 
 export const financeViews = ["Finance"];
 type Tab =
@@ -61,7 +62,6 @@ const storageCategories: { id: StorageCategory; label: string; unit: string; mis
   { id: "PROCESSED_EXPORT", label: "Processed export coffee", unit: "bag/day" },
   { id: "GRADE_IMPROVEMENT", label: "Grade-improvement coffee", unit: "bag/day", missingNote: "No separate rate identified in Agreement 001/2018" },
   { id: "REJECT", label: "Reject coffee", unit: "bag/day" },
-  { id: "EMPTY_BAGS", label: "Empty bags", unit: "50 bags/day" },
 ];
 
 function Status({ value }: { value: string }) {
@@ -1226,7 +1226,6 @@ export function FinanceOperations() {
                     Grade-improvement coffee
                   </option>
                   <option value="REJECT">Reject coffee</option>
-                  <option value="EMPTY_BAGS">Empty bags</option>
                 </select>
               </label>
               <div className={`certification-billing-control ${selectedLotCertified ? "verified" : "standard"}`}>
@@ -1418,6 +1417,10 @@ export function FinanceOperations() {
             )}
           </section>
         </div>
+      )}
+
+      {tab === "Storage Review" && data && (
+        <EmptyBagBilling key={billingClientId} data={data} clientId={billingClientId} onPosted={reloadFinance} />
       )}
 
       {tab === "Client Statement" && (
@@ -1617,6 +1620,9 @@ export function FinanceOperations() {
             { label: "Source record", value: selectedService.reference_id?.slice(0, 8).toUpperCase() ?? "Manual service" },
           ]} />
           <p className="drawer-explainer">This is work awaiting invoice preparation, not a payment. Payment is recorded only after finance issues an invoice.</p>
+          {selectedService.reference_type === "EMPTY_BAG_CHARGE_RUN" && selectedService.reference_id && (
+            <SavedBagChargeCalculation runId={selectedService.reference_id} />
+          )}
           <EvidenceUploader reference={{ type: selectedService.reference_type ?? "SERVICE_EVENT", id: selectedService.reference_id ?? selectedService.id, label: selectedService.description }} documentType="SERVICE_EVIDENCE" label="Service evidence" help="Attach the job card, voucher, receipt, or approved worksheet." />
         </RecordDetailDrawer>
       )}
@@ -1646,6 +1652,9 @@ export function FinanceOperations() {
                 <span><strong>{line.service_type?.replaceAll("_", " ") ?? line.description}</strong><small>{line.description}</small></span>
                 <span>{Number(line.quantity).toLocaleString()} × ETB {Number(line.rate_etb).toLocaleString()}</span>
                 <strong>ETB {Number(line.amount_etb ?? Number(line.quantity) * Number(line.rate_etb)).toLocaleString()}</strong>
+                {line.reference_type === "EMPTY_BAG_CHARGE_RUN" && line.reference_id && (
+                  <SavedBagChargeCalculation runId={line.reference_id} />
+                )}
               </div>
             ))}
             {!invoiceDetailRow.invoice.line_snapshot.length && <p className="empty-result">This invoice has no service lines.</p>}
