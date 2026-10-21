@@ -4,6 +4,7 @@ import { Check, Download, FileText, FlaskConical, Plus, Printer, RefreshCw, Send
 import { type FormEvent, useEffect, useState } from "react";
 import { supabaseConfigured } from "@/lib/supabase/client";
 import { laboratoryDatabaseEnabled } from "@/lib/laboratory-config";
+import { coffeeCategories, laboratoryGrades, validLaboratoryGrade } from "@/lib/laboratory-fields";
 import { EvidenceUploader } from "./workflow-ui";
 import {
   createLabSample, downloadLabReport, labResultsFromSample, loadLaboratoryData, openLabReportForPrint,
@@ -37,7 +38,7 @@ function LaboratoryPreview() {
         <label>Warehouse lot (optional)<input disabled placeholder="Independent sample or linked lot" /></label>
         <label>Received on<input disabled placeholder="Date received" /></label>
         <label>Origin<input disabled placeholder="Coffee origin" /></label>
-        <label>Process<input disabled placeholder="Washed or natural" /></label>
+        <label>Coffee category<input disabled placeholder="Washed, Natural, or UG" /></label>
         <button className="primary-button" type="button" disabled><Plus size={16} />Register sample</button>
       </div>
     </section>
@@ -78,6 +79,8 @@ export function LaboratoryOperations({ role, userId, onNavigate }: { role: strin
   const reports = data?.reports.filter((item) => item.sample_id === selectedId) ?? [];
   const currentReport = reports.find((item) => item.version === selected?.report_version);
   const delivery = data?.deliveries.find((item) => item.report_id === currentReport?.id);
+  const grades = laboratoryGrades(selected?.process ?? "");
+  const gradeValid = selected ? validLaboratoryGrade(selected.process, results.proposedGrade) : false;
 
   async function reload(focusId?: string) {
     setLoading(true);
@@ -123,10 +126,11 @@ export function LaboratoryOperations({ role, userId, onNavigate }: { role: strin
     finally { setBusy(false); }
   }
 
-  function input<K extends keyof LabResults>(key: K, label: string, options?: { number?: boolean; required?: boolean }) {
+  function input<K extends keyof LabResults>(key: K, label: string, options?: { number?: boolean; required?: boolean; placeholder?: string }) {
     return <label key={key}>{label}<input type={options?.number ? "number" : "text"} min={options?.number ? "0" : undefined}
       max={options?.number && (key === "moisturePercent" || key === "screen14Percent") ? "100" : undefined}
-      step={options?.number ? "0.01" : undefined} maxLength={options?.number ? undefined : 180}
+      step={options?.number ? "0.01" : undefined} inputMode={options?.number ? "decimal" : undefined}
+      maxLength={options?.number ? undefined : 180} placeholder={options?.placeholder}
       required={options?.required} value={results[key]} disabled={selected?.status !== "DRAFT" || busy}
       onChange={(event) => setResults((current) => ({ ...current, [key]: event.target.value }))} /></label>;
   }
@@ -138,6 +142,7 @@ export function LaboratoryOperations({ role, userId, onNavigate }: { role: strin
 
   return <div className="module-page laboratory-page">
     <header className="lab-heading"><div><span className="demo-label">QUALITY SERVICES</span><h1>Laboratory</h1><p>Register samples, record green and cup observations, approve a report, then open the PDF to print or download it.</p></div><FlaskConical size={30} aria-hidden="true" /></header>
+    {laboratoryConnected && <p className="billing-notice">Record each sample from its assessment. The assessor selects the proposed grade for the coffee category; review the result before approving the report.</p>}
     {error && <div className="request-form-error" role="alert">{error}</div>}
     {message && <div className="prototype-note" role="status"><Check size={18} /><span>{message}</span></div>}
     {!laboratoryConnected && <LaboratoryPreview />}
@@ -148,7 +153,7 @@ export function LaboratoryOperations({ role, userId, onNavigate }: { role: strin
         <label>Warehouse lot (optional)<select value={lotId} onChange={(event) => setLotId(event.target.value)} disabled={!clientId}><option value="">Independent sample</option>{data?.lots.filter((item) => item.client_id === clientId).map((item) => <option key={item.id} value={item.id}>{item.lot_number}</option>)}</select></label>
         <label>Received on<input type="date" required max={new Date().toISOString().slice(0, 10)} value={receivedOn} onChange={(event) => setReceivedOn(event.target.value)} /></label>
         <label>Origin<input required maxLength={120} minLength={2} value={origin} onChange={(event) => setOrigin(event.target.value)} /></label>
-        <label>Process<input required maxLength={120} minLength={2} value={process} onChange={(event) => setProcess(event.target.value)} /></label>
+        <label>Coffee category<select required value={process} onChange={(event) => setProcess(event.target.value)}><option value="">Choose category</option>{coffeeCategories.map((category) => <option key={category} value={category}>{category}</option>)}</select><small>Washed and Natural allow Grade 1–5; UG uses the UG grade label.</small></label>
         <button className="primary-button" type="submit" disabled={busy}><Plus size={16} />{busy ? "Saving..." : "Register sample"}</button>
       </form>
     </section>}
@@ -160,24 +165,27 @@ export function LaboratoryOperations({ role, userId, onNavigate }: { role: strin
     </section>
     {selected && <section className="lab-card lab-detail"><div className="lab-section-head lab-record-head"><div><span className="demo-label">{selected.sample_code}</span><h2>{client?.legal_name}</h2><p>{selected.origin} · {selected.process} · received {selected.received_on} · {selected.lot_id ? `lot ${data?.lots.find((item) => item.id === selected.lot_id)?.lot_number ?? selected.lot_id}` : "independent sample"}</p>{selected.lot_id && <button type="button" className="link-button" onClick={() => onNavigate({ view: "Coffee Lots", focusId: selected.lot_id ?? undefined })}>Open linked lot</button>}</div><span className="lab-status">{selected.status}</span></div>
       <div className="lab-steps"><span className="done">1. Register</span><span className={selected.status !== "DRAFT" ? "done" : ""}>2. Evaluate</span><span className={selected.status === "APPROVED" ? "done" : ""}>3. Approve and print</span>{emailEnabled && <span className={delivery?.status === "ACCEPTED" ? "done" : ""}>4. Email</span>}</div>
-      <form onSubmit={(event) => { event.preventDefault(); void run(() => saveLabSample(selected.id, results), "Draft evaluation saved.", selected.id); }}>
+      <form onSubmit={(event) => { event.preventDefault(); void run(() => saveLabSample(selected.id, results, selected.process), "Draft evaluation saved.", selected.id); }}>
         <h3>Green coffee assessment</h3><div className="lab-grid">
-          {input("moisturePercent", "Moisture %", { number: true })}{input("screen14Percent", "Screen 14 and above %", { number: true })}
-          {input("shapeMake", "Shape and make")}{input("greenOdour", "Odour")}
-          {input("greenColour", "Colour")}{input("greenQuality", "Green quality")}
+          {input("moisturePercent", "Moisture %", { number: true, placeholder: "e.g. 11.2" })}{input("screen14Percent", "Screen 14 and above %", { number: true, placeholder: "e.g. 93" })}
+          {input("shapeMake", "Shape and make", { placeholder: "e.g. uniform, some broken beans" })}{input("greenOdour", "Odour", { placeholder: "e.g. clean, no off-odour" })}
+          {input("greenColour", "Colour", { placeholder: "e.g. blue-green" })}{input("greenQuality", "Green quality", { placeholder: "e.g. even appearance" })}
           {notes("greenComment", "Overall green quality observations", true)}
         </div>
         <h3>Cup assessment</h3><div className="lab-grid">
-          {input("cupCleanliness", "Cup cleanliness")}{input("acidity", "Acidity")}{input("body", "Body")}{input("flavour", "Flavour")}{input("cupOverall", "Overall cup impression")}
+          {input("cupCleanliness", "Cup cleanliness", { placeholder: "e.g. clean, no cup defect" })}{input("acidity", "Acidity", { placeholder: "e.g. bright, medium" })}{input("body", "Body", { placeholder: "e.g. medium, smooth" })}{input("flavour", "Flavour", { placeholder: "e.g. citrus, floral" })}{input("cupOverall", "Overall cup impression", { placeholder: "e.g. balanced, pleasant finish" })}
           {notes("cupComment", "Overall cup observations", true)}
         </div>
         <h3>Conclusion</h3><div className="lab-grid">
-          {input("greenValue", "Green value", { number: true })}{input("cupValue", "Cup value", { number: true })}{input("totalValue", "Total value", { number: true })}
-          {input("proposedGrade", "Proposed grade", { required: true })}
+          {input("greenValue", "Green value", { number: true, placeholder: "Number only" })}{input("cupValue", "Cup value", { number: true, placeholder: "Number only" })}{input("totalValue", "Total value", { number: true, placeholder: "Number only" })}
+          <label>Proposed grade<select required value={results.proposedGrade} disabled={selected.status !== "DRAFT" || busy} onChange={(event) => setResults((current) => ({ ...current, proposedGrade: event.target.value }))}>
+            <option value="">Choose grade</option>{results.proposedGrade && !grades.includes(results.proposedGrade) && <option value={results.proposedGrade}>{results.proposedGrade} (previous value)</option>}
+            {grades.map((grade) => <option key={grade} value={grade}>{grade}</option>)}
+          </select><small>{selected.process === "UG" ? "UG is recorded as UG; no 1–5 grade is assigned." : "Choose the assessor’s grade from 1 to 5."}</small></label>
           {notes("recommendation", "Recommendation")}
         </div>
         <p className="lab-note">Scores and grades are entered by staff. The sample form does not establish Hayked scoring rules.</p>
-        {selected.status === "DRAFT" && canRecord(role) && <div className="lab-actions"><button type="submit" className="secondary-button" disabled={busy}>Save draft</button><button type="button" className="primary-button" disabled={busy || !results.greenComment.trim() || !results.cupComment.trim() || !results.proposedGrade.trim()} onClick={() => void run(async () => { await saveLabSample(selected.id, results); await transitionLabSample("submit", selected.id); }, "Assessment submitted for independent review.", selected.id)}>Save and submit</button></div>}
+        {selected.status === "DRAFT" && canRecord(role) && <div className="lab-actions"><button type="submit" className="secondary-button" disabled={busy}>Save draft</button><button type="button" className="primary-button" disabled={busy || !results.greenComment.trim() || !results.cupComment.trim() || !gradeValid} onClick={(event) => { if (!event.currentTarget.form?.reportValidity()) return; void run(async () => { await saveLabSample(selected.id, results, selected.process); await transitionLabSample("submit", selected.id); }, "Assessment submitted for independent review.", selected.id); }}>Save and submit</button></div>}
       </form>
       {selected.status === "SUBMITTED" && canApprove(role) && <div className="lab-review"><strong>Independent review</strong><p>Review every result above before approving. The person who submitted this assessment cannot approve it.</p><button className="primary-button" type="button" disabled={busy || selected.submitted_by === userId} onClick={() => void run(() => transitionLabSample("approve", selected.id), "Approved report created. It can now be opened for printing or downloaded.", selected.id)}><Check size={16} />Approve report</button></div>}
       {selected.status === "APPROVED" && canApprove(role) && <div className="lab-review"><strong>Need a correction?</strong><p>Reopening preserves the approved version. A corrected result must be submitted and approved as a new version.</p><button className="secondary-button" type="button" disabled={busy} onClick={() => void run(() => transitionLabSample("reopen", selected.id), "Sample reopened as a draft. The earlier approved report remains available.", selected.id)}><RefreshCw size={16} />Create revision</button></div>}
