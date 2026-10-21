@@ -28,6 +28,8 @@ test("an approved snapshot becomes a valid, versioned PDF", async () => {
   assert.match(Buffer.from(bytes.subarray(0, 8)).toString(), /^%PDF-/);
   const document = await PDFDocument.load(bytes);
   assert.equal(document.getPageCount(), 1);
+  const { width, height } = document.getPage(0).getSize();
+  assert.ok(Math.abs(width - 595.28) < 0.01 && Math.abs(height - 841.89) < 0.01);
 });
 
 test("long observations continue on later pages", async () => {

@@ -1,7 +1,9 @@
 import { authorizedLaboratoryReport, laboratoryError } from "@/lib/laboratory-server";
 import { renderLaboratoryPdf } from "@/lib/laboratory-pdf";
+import { laboratoryDatabaseEnabled } from "@/lib/laboratory-config";
 
 export async function POST(request: Request, context: { params: Promise<{ reportId: string }> }) {
+  if (!laboratoryDatabaseEnabled) return Response.json({ error: "Laboratory records are not enabled on this site." }, { status: 503 });
   try {
     const { reportId } = await context.params;
     const { db, actor, report, sample, client } = await authorizedLaboratoryReport(request, reportId, "send");

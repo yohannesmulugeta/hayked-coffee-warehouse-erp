@@ -945,7 +945,7 @@ export function ManagementOperations({
                 <option value="PAYMENT_SLIP">Payment slip</option>
                 <option value="DISPATCH_RELEASE">Dispatch release</option>
                 <option value="CREDIT_APPROVAL">Credit approval</option>
-                <option value="LAB_SOURCE_EVIDENCE">Laboratory source evidence</option>
+                {process.env.NEXT_PUBLIC_LAB_DATABASE_ENABLED === "true" && <option value="LAB_SOURCE_EVIDENCE">Laboratory source evidence</option>}
                 <option value="SUPPORTING_DOCUMENT">Supporting document</option>
               </select>
             </label>

@@ -31,6 +31,15 @@ values ('90000000-0000-0000-0000-000000000001', 1, '60000000-0000-0000-0000-0000
 insert into public.stock_reservations (dispatch_id, lot_id, reserved_bags, reserved_kg, created_by)
 values ('90000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000001', 20, 1200, '10000000-0000-0000-0000-000000000001');
 
+insert into public.quantity_checks (
+  stage, reference_id, client_id, expected_kg, measured_kg, expected_bags, measured_bags,
+  evidence_reference, status, recorded_by, verified_by, verified_at
+)
+select 'DISPATCH_EXIT', id, client_id, 1200, 1200, 20, 20,
+  'TEST-DISPATCH-EXIT', 'APPROVED',
+  '10000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000002', now()
+from public.dispatch_orders where id = '90000000-0000-0000-0000-000000000001';
+
 set local role authenticated;
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000001';
 

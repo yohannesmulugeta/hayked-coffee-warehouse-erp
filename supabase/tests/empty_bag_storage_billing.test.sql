@@ -1,4 +1,5 @@
 begin;
+select plan(1);
 
 create temporary table bag_charge_test_context as
 select client.id as client_id, warehouse.id as warehouse_id, agreement.id as agreement_id
@@ -157,4 +158,7 @@ do $$ declare c uuid; a uuid; begin
   end;
 end $$;
 
+reset role;
+select pass('Empty-bag cohort billing and independent review checks passed');
+select * from finish();
 rollback;

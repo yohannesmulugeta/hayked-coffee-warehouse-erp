@@ -3,6 +3,21 @@ select plan(12);
 
 reset role;
 
+-- The later physical-verification migration requires a second staff member's exact check.
+insert into public.quantity_checks (
+  stage, reference_id, client_id, expected_kg, measured_kg, expected_bags, measured_bags,
+  evidence_reference, status, recorded_by, verified_by, verified_at
+)
+select 'PROCESSING_INTAKE', order_record.id, order_record.client_id,
+  order_record.input_kg, order_record.input_kg,
+  sum(input.input_bags)::integer, sum(input.input_bags)::integer,
+  'TEST-PHASE1-INTAKE', 'APPROVED',
+  '10000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000002', now()
+from public.processing_orders order_record
+join public.processing_order_inputs input on input.order_id = order_record.id
+where order_record.order_number = 'PRO-2026-0013'
+group by order_record.id;
+
 select lives_ok(
   $sql$update public.processing_orders set status = 'IN_PROCESS' where order_number = 'PRO-2026-0013'$sql$,
   'An approved queued order can start without optional ECX information'
@@ -74,7 +89,7 @@ select is(
 
 select throws_like(
   $sql$update public.service_events set status = 'PREPARED' where service_type = 'LABOUR' and status = 'UNBILLED'$sql$,
-  '%The LABOUR service rate is not yet approved for invoice preparation.%',
+  '%Manual service lacks an independently verified catalog rate.%',
   'An unapproved labour rate cannot enter invoice preparation'
 );
 select is(

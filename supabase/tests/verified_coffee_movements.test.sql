@@ -1,4 +1,5 @@
 begin;
+select plan(1);
 
 create temporary table verified_coffee_test (name text primary key, id uuid not null);
 grant all on verified_coffee_test to authenticated;
@@ -327,4 +328,7 @@ begin
 end;
 $$;
 
+reset role;
+select pass('Verified coffee movements and transformation checks passed');
+select * from finish();
 rollback;

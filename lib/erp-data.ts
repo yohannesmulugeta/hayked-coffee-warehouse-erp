@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "./supabase/client";
+import { laboratoryDatabaseEnabled } from "./laboratory-config";
 import { activeOn, clientReadiness } from "@/app/client-onboarding";
 import type { CoffeeLot, StockMovement, WarehouseReceipt } from "@/app/grn-workflow";
 import type { ProcessingOutputLine, ProcessingRequest, ProcessingRequestLine } from "@/app/processing-workflow";
@@ -96,7 +97,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
     db.from("documents").select("id,document_number,file_name,status"),
     db.from("quantity_checks").select("id,stage,reference_id,client_id,evidence_reference,status"),
     db.from("coffee_transform_jobs").select("id,job_type,client_id,evidence_reference,status"),
-    db.from("lab_samples").select("id,sample_code,client_id,status"),
+    laboratoryDatabaseEnabled ? db.from("lab_samples").select("id,sample_code,client_id,status") : Promise.resolve({ data: [] as { id: string; sample_code: string; client_id: string; status: string }[], error: null }),
     db.from("empty_bag_charge_runs").select("id,run_number,client_id,status"),
   ]);
   const lots = result(lotResult.data, lotResult.error) as { id: string; lot_number: string; client_id: string; lot_category: string | null; ownership_type: string; bag_count: number; quantity_kg: number; status: string }[];
@@ -825,7 +826,7 @@ export async function loadManagementData() {
     db.from("clients").select("id,code,legal_name"),
     db.from("arrears_cases").select("id,case_number,client_id,invoice_id,stage,outstanding_etb,opened_on,oldest_due_on,next_action_on,assigned_to,notes,closed_at,created_at,updated_at").order("created_at", { ascending: false }),
     db.from("arrears_case_events").select("id,case_id,from_stage,to_stage,note,action_by,created_at").order("created_at", { ascending: false }),
-    db.from("lab_samples").select("id,sample_code"),
+    laboratoryDatabaseEnabled ? db.from("lab_samples").select("id,sample_code") : Promise.resolve({ data: [] as { id: string; sample_code: string }[], error: null }),
     db.rpc("list_admin_users"),
   ]);
   const references = new Map<string, string>();

@@ -1,4 +1,5 @@
 begin;
+select plan(1);
 
 create temporary table empty_bag_test_context as
 select client.id as client_id, warehouse.id as warehouse_id
@@ -197,4 +198,7 @@ begin
 end;
 $$;
 
+reset role;
+select pass('Empty-bag custody movements, approvals, and access checks passed');
+select * from finish();
 rollback;

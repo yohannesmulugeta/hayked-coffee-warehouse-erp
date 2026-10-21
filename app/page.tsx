@@ -247,6 +247,7 @@ type CurrentProfile = { id: string; full_name: string; role: string };
 
 function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: CurrentProfile }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [activeView, setActiveView] = useState("Dashboard");
   const [query, setQuery] = useState("");
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
@@ -291,6 +292,32 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
+  useEffect(() => {
+    if (!compactNavigation || !sidebarOpen) return;
+    const drawer = document.querySelector<HTMLElement>(".sidebar");
+    drawer?.querySelector<HTMLButtonElement>(".sidebar-head button")?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSidebarOpen(false);
+        requestAnimationFrame(() => menuButtonRef.current?.focus());
+      } else if (event.key === "Tab") {
+        const focusable = Array.from(drawer?.querySelectorAll<HTMLButtonElement>("button:not([disabled])") ?? []);
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [compactNavigation, sidebarOpen]);
   useEffect(() => {
     if (!profileOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setProfileOpen(false); };
@@ -364,6 +391,11 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
     setQuery("");
   }
 
+  function closeNavigation() {
+    setSidebarOpen(false);
+    if (compactNavigation) requestAnimationFrame(() => menuButtonRef.current?.focus());
+  }
+
   function metricIntent(label: string): NavigationIntent {
     if (label === "Arrival Coffee") return { view: "Coffee Lots", stockType: "Arrival" };
     if (label === "Processed Coffee") return { view: "Coffee Lots", stockType: "Processed" };
@@ -381,10 +413,10 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
   return (
     <main className={`app-shell ${viewClass} ${masterDataClass}`}>
       <a className="skip-link" href="#workspace-content">Skip to workspace</a>
-      <Sidebar open={sidebarOpen} compact={compactNavigation} activeView={activeView} pendingApprovals={dashboardData?.pendingApprovals ?? 0} databaseStatus={databaseStatus} role={profile.role} onNavigate={navigate} onClose={() => setSidebarOpen(false)} />
+      <Sidebar open={sidebarOpen} compact={compactNavigation} activeView={activeView} pendingApprovals={dashboardData?.pendingApprovals ?? 0} databaseStatus={databaseStatus} role={profile.role} onNavigate={navigate} onClose={closeNavigation} />
       <section className="workspace" id="workspace-content" tabIndex={-1} aria-hidden={compactNavigation && sidebarOpen} inert={compactNavigation && sidebarOpen ? true : undefined}>
         <header className="topbar">
-          <div className="crumb"><button type="button" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}><Menu size={20} /><span>Menu</span></button><span>Workspace</span><ChevronRight size={13} /><strong>{viewLabels.get(activeView) ?? activeView}</strong></div>
+          <div className="crumb"><button ref={menuButtonRef} type="button" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}><Menu size={20} /><span>Menu</span></button><span>Workspace</span><ChevronRight size={13} /><strong>{viewLabels.get(activeView) ?? activeView}</strong></div>
           <div className="top-actions">
             <div className="global-search-wrap"><label className="global-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search any client, coffee, payment or document" aria-label="Search warehouse records" /></label>{query.trim().length >= 2 && <div className="global-search-results" role="listbox" aria-label="Search results">{searchResults.length ? searchResults.map((item) => <button key={`${item.kind}-${item.id}`} type="button" onClick={() => navigate({ view: item.view, focusId: item.id })}><span>{item.kind}</span><strong>{item.title}</strong><small>{item.context}</small></button>) : <p>No matching warehouse records.</p>}</div>}</div>
             {canAccessView(profile.role, "Approvals") && <button className="icon-button" type="button" aria-label="Approvals" onClick={() => navigate({ view: "Approvals" })}><ClipboardCheck size={18} />{Boolean(dashboardData?.pendingApprovals) && <b>{dashboardData?.pendingApprovals}</b>}</button>}
