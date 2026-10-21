@@ -142,7 +142,7 @@ export function LaboratoryOperations({ role, userId, onNavigate }: { role: strin
 
   return <div className="module-page laboratory-page">
     <header className="lab-heading"><div><span className="demo-label">QUALITY SERVICES</span><h1>Laboratory</h1><p>Register samples, record green and cup observations, approve a report, then open the PDF to print or download it.</p></div><FlaskConical size={30} aria-hidden="true" /></header>
-    {laboratoryConnected && <p className="billing-notice">Testing release on the live database: register only documented samples. Staff choose the proposed grade; the system does not calculate it automatically.</p>}
+    {laboratoryConnected && <p className="billing-notice">Record each sample from its assessment. The assessor selects the proposed grade for the coffee category; review the result before approving the report.</p>}
     {error && <div className="request-form-error" role="alert">{error}</div>}
     {message && <div className="prototype-note" role="status"><Check size={18} /><span>{message}</span></div>}
     {!laboratoryConnected && <LaboratoryPreview />}

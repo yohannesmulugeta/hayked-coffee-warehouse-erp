@@ -200,7 +200,7 @@ export function EmptyBagControl() {
         </div>
         <span className="status-pill">Custody ledger</span>
       </header>
-      <p className="billing-notice">Testing release on the live database: record only real, authorized bag movements. Storage billing requires an independently verified tariff; bag printing orders remain separate.</p>
+      <p className="billing-notice">Record client-owned empty bags when they enter, move within, or leave the warehouse. Include the movement date, location, condition, and supporting reference. Bag printing orders are managed separately.</p>
       {error && <p className="request-form-error" role="alert">{error}</p>}
       {message && <p className="form-message" role="status">{message}</p>}
       <label className="empty-bag-client-picker">
