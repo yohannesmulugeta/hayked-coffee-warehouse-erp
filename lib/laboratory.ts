@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "./supabase/client";
+import { coffeeCategories, validLaboratoryGrade } from "./laboratory-fields";
 
 export type LabSample = {
   id: string; organization_id: string; sample_code: string; client_id: string; lot_id: string | null;
@@ -60,6 +61,7 @@ export async function loadLaboratoryData() {
 }
 
 export async function createLabSample(input: { clientId: string; lotId: string; receivedOn: string; origin: string; process: string }) {
+  if (!(coffeeCategories as readonly string[]).includes(input.process)) throw new Error("Choose Washed, Natural, or UG.");
   const { data, error } = await createSupabaseClient().rpc("create_lab_sample", {
     p_client_id: input.clientId, p_lot_id: input.lotId || null, p_received_on: input.receivedOn,
     p_origin: input.origin, p_process: input.process,
@@ -67,7 +69,10 @@ export async function createLabSample(input: { clientId: string; lotId: string; 
   return checked(data as string | null, error, "The sample could not be registered.");
 }
 
-export async function saveLabSample(sampleId: string, results: LabResults) {
+export async function saveLabSample(sampleId: string, results: LabResults, category: string) {
+  if (results.proposedGrade && !validLaboratoryGrade(category, results.proposedGrade)) {
+    throw new Error("Choose a grade allowed for this coffee category.");
+  }
   const { error } = await createSupabaseClient().rpc("save_lab_sample", { p_sample_id: sampleId, p_results: results });
   if (error) throw new Error(error.message);
 }
