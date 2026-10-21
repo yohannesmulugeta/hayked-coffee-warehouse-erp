@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, ChevronRight, Eye, FileText, LoaderCircle, Paperclip, Upload, X } from "lucide-react";
-import { ChangeEvent, ReactNode, useRef, useState } from "react";
+import { ChangeEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { uploadBusinessDocument, type BusinessReference } from "@/lib/erp-data";
 
 export type WorkflowStep = {
@@ -41,10 +41,32 @@ export function RecordDetailDrawer({
   actions?: ReactNode;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? []);
+    (focusable()[0] ?? dialog)?.focus();
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") { event.preventDefault(); onCloseRef.current(); return; }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (!items.length) { event.preventDefault(); dialog?.focus(); return; }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => { document.removeEventListener("keydown", onKeyDown); previous?.focus(); };
+  }, [open]);
   if (!open) return null;
   return <div className="record-drawer-layer" role="presentation">
     <button className="record-drawer-scrim" type="button" aria-label="Close details" onClick={onClose} />
-    <aside className="record-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="record-drawer-title">
+    <aside ref={dialogRef} tabIndex={-1} className="record-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="record-drawer-title">
       <header><div><span>{eyebrow}</span><h2 id="record-drawer-title">{title}</h2>{subtitle && <p>{subtitle}</p>}</div>{status}<button type="button" onClick={onClose} aria-label="Close details"><X size={20} /></button></header>
       <div className="record-detail-body">{children}</div>
       <footer><button className="secondary-button" type="button" onClick={onClose}>Close</button>{actions}</footer>

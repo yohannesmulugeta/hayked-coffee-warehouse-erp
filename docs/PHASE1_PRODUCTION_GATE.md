@@ -13,6 +13,8 @@ This checklist covers operational correctness, data integrity, deployment readin
 - Storage billing cannot enter `INVOICED` without daily evidence that exactly reconciles its bag-days and amount.
 - Manual service posting uses a database-approved, independently reviewed rate. The browser cannot choose or override the price.
 - Unapproved labour, bag-printing, generator, and other service rates cannot be prepared for invoicing.
+- Empty client-owned jute-bag billing has a local cohort/FIFO calculation, proportional Article 16 rates, independent approval, and an invoice link; its migration and rollback-only SQL flow passed on the local test database. Article 16.4 requires a documented manual trigger and a separate review.
+- Washed Grade 3–5 processing charges are blocked until management approves a rate mapping.
 - A server-side database health endpoint is available at `/api/health`.
 - CI definitions run lint, type checking, production builds, application tests, database tests, database lint, and a production-dependency audit.
 
@@ -23,6 +25,9 @@ This checklist covers operational correctness, data integrity, deployment readin
 | Service rates | Finance + second independent reviewer | Approved rate, unit, effective dates, governing tariff, and two different reviewer identities | BLOCKED |
 | Tax mapping | Finance/management | Written mapping for every billable service and effective date | BLOCKED |
 | Labour, bag printing, generator, and other charges | Management + finance | Written approval of whether each charge is billable and its calculation basis | BLOCKED |
+| Empty client-owned bag storage (Article 16) | Warehouse + finance | Reconciled opening counts; verify the signed tariff version, effective dates, and tax mapping against the contract before loading rates | BLOCKED |
+| Article 16.4 exception | Management + finance | Confirm the exact Amharic trigger and supporting notice/evidence; approve each case independently before posting the ETB 100/day charge | BLOCKED |
+| Washed Grade 3–5 processing | Management + finance | Approve a signed processing price mapping before those grades can be charged | BLOCKED |
 | Dispatch `DSP-2026-0018` | Warehouse manager | Cancel it or rebuild its lines/reservations so header, lines, ownership, and stock agree | BLOCKED |
 | Storage run `SBR-2026-0008` | Finance + warehouse manager | Supply reconciled daily storage evidence or reverse/correct the legacy invoiced state through an approved migration | BLOCKED |
 
@@ -38,6 +43,7 @@ Do not bypass these blocks with hard-coded prices, sample evidence, direct table
 - [ ] Load management-approved rate and tax records; retain source documents and reviewer evidence.
 - [ ] Run CI and retain the successful run link.
 - [ ] Test the complete receive, process, dispatch, storage-billing, manual-service, invoice, payment, reporting, and audit-history flows in the preview browser.
+- [ ] Test empty-bag receipt, issue, return, transfer, manager-reviewed correction, reconciliation, receipt-cohort FIFO, 10/11/40/41-day boundaries, Article 16.4 review, invoice posting, and backdated-movement rejection on a copied database and in the preview browser.
 - [ ] Test database-unavailable behavior and `/api/health` failure behavior.
 - [ ] Obtain warehouse, finance, and management acceptance sign-off.
 

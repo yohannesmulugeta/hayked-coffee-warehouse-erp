@@ -9,15 +9,16 @@ import {
   FileCheck2,
   LockKeyhole,
   Printer,
-  ReceiptText,
   Search,
   ShieldCheck,
   WalletCards,
 } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
-import { allocatePayment, invoiceActivityDate, invoiceDisplayStatus, invoiceOutstanding, nextStorageRentStart, paymentPostAction, type StorageCategory } from "./finance-rules";
+import { createSupabaseClient } from "@/lib/supabase/client";
+import { billingDate, billingAccountStatus, allocatePayment, invoiceActivityDate, invoiceDisplayStatus, invoiceOutstanding, nextStorageRentStart, paymentPostAction, type StorageCategory } from "./finance-rules";
 import {
   createInvoiceDraft,
+  issuePreparedInvoice,
   loadFinanceData,
   postStorageRentBilling,
   quoteStorageBilling,
@@ -35,8 +36,12 @@ import {
   WorkflowGuide,
 } from "./workflow-ui";
 
+import { RentOverview, BillingServiceForm, BillingPriceVersions, SavedRentCalculation } from "./billing-workspace";
+import { EmptyBagBilling, SavedBagChargeCalculation } from "./empty-bag-billing";
+
 export const financeViews = ["Finance"];
 type Tab =
+  | "Add Service"
   | "Client Accounts"
   | "Unbilled Services"
   | "Invoices"
@@ -55,14 +60,6 @@ const billingTabs: { id: Tab; label: string }[] = [
   { id: "Rate Reference", label: "Rates" },
 ];
 
-const storageCategories: { id: StorageCategory; label: string; unit: string; missingNote?: string }[] = [
-  { id: "NO_PROCESSING", label: "Stored without processing", unit: "bag/day" },
-  { id: "WAITING_PROCESSING", label: "Waiting for processing", unit: "bag/day" },
-  { id: "PROCESSED_EXPORT", label: "Processed export coffee", unit: "bag/day" },
-  { id: "GRADE_IMPROVEMENT", label: "Grade-improvement coffee", unit: "bag/day", missingNote: "No separate rate identified in Agreement 001/2018" },
-  { id: "REJECT", label: "Reject coffee", unit: "bag/day" },
-  { id: "EMPTY_BAGS", label: "Empty bags", unit: "50 bags/day" },
-];
 
 function Status({ value }: { value: string }) {
   return (
@@ -71,11 +68,12 @@ function Status({ value }: { value: string }) {
     </span>
   );
 }
-const today = new Date().toISOString().slice(0, 10);
+const today = billingDate();
+const yesterday = billingDate(-1);
 const monthStart = `${today.slice(0, 7)}-01`;
 
-export function FinanceOperations() {
-  const [tab, setTab] = useState<Tab>("Client Accounts");
+export function FinanceOperations({ focusId, initialTab = "Client Accounts" }: { focusId?: string; initialTab?: "Client Accounts" | "Storage Review" }) {
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [message, setMessage] = useState("");
   const [data, setData] = useState<FinanceData | null>(null);
   const [selectedClientId, setSelectedClientId] = useState("");
@@ -92,7 +90,9 @@ export function FinanceOperations() {
   const [category, setCategory] =
     useState<StorageCategory>("WAITING_PROCESSING");
   const [periodStart, setPeriodStart] = useState(monthStart);
-  const [periodEnd, setPeriodEnd] = useState(today);
+  const [periodEnd, setPeriodEnd] = useState(yesterday);
+  const [issuing, setIssuing] = useState(false);
+  const [invoiceDue, setInvoiceDue] = useState(today);
   const [paymentAmount, setPaymentAmount] = useState(0);
   const [paymentReference, setPaymentReference] = useState("");
   const [paymentDate, setPaymentDate] = useState(today);
@@ -146,6 +146,22 @@ export function FinanceOperations() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void reloadFinance();
   }, []);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a workspace deep link changes the selected billing tab
+    setTab(initialTab);
+  }, [initialTab]);
+  useEffect(() => {
+    if (!data || !focusId) return;
+    const invoice = data.invoices.find((item) => item.id === focusId);
+    if (invoice) { // eslint-disable-next-line react-hooks/set-state-in-effect -- restore a direct record link
+      setTab("Invoices"); setInvoiceDetailId(invoice.id); return; }
+    const payment = data.payments.find((item) => item.id === focusId);
+    if (payment) { setTab("Payments"); setSelectedClientId(payment.client_id); return; }
+    let active = true;
+    void createSupabaseClient().from("empty_bag_charge_runs").select("client_id").eq("id", focusId).maybeSingle()
+      .then(({ data: charge }) => { if (active && charge) { setBillingClientId(charge.client_id); setTab("Storage Review"); } });
+    return () => { active = false; };
+  }, [data, focusId]);
 
   const clients = data?.clients.filter((item) => item.active) ?? [];
   const clientById = new Map(clients.map((item) => [item.id, item.legal_name]));
@@ -224,6 +240,10 @@ export function FinanceOperations() {
     return {
       client,
       invoices,
+      draft: invoices.filter(row => row.invoice.status === "DRAFT").reduce((sum,row) => sum + Number(row.invoice.total_etb),0),
+      rents: (data?.rentOverview ?? []).filter(r => r.clientId === client.id),
+      accrued: (data?.rentOverview ?? []).filter(r => r.clientId === client.id).reduce((sum,r) => sum + Number(r.accrued ?? 0),0),
+      rentPending: (data?.rentOverview ?? []).some(r => r.clientId === client.id && (r.error || Number(r.accrued) > 0)),
       services,
       payments,
       billed: periodInvoices.reduce(
@@ -259,7 +279,7 @@ export function FinanceOperations() {
         accountStatus === "All" ||
         (accountStatus === "Owing" && account.outstanding > 0) ||
         (accountStatus === "Overdue" && account.overdue) ||
-        (accountStatus === "Clear" && account.outstanding === 0);
+        (accountStatus === "Clear" && billingAccountStatus(account.outstanding, account.draft, account.unbilled, account.rentPending) === "CLEAR");
       return matchesClient && matchesSearch && matchesStatus;
     })
     .sort((a, b) =>
@@ -292,15 +312,18 @@ export function FinanceOperations() {
     invoiceRows.find((item) => item.invoice.id === selectedInvoiceId) ??
     invoiceRows[0];
   const invoiceDetailRow = invoiceRows.find((item) => item.invoice.id === invoiceDetailId);
+  const invoicePriceVersion = data?.tariffs.find(t => t.version_code === invoiceDetailRow?.invoice.tariff_version);
+  const issueTax = invoicePriceVersion?.invoice_tax_rate == null ? null
+    : Math.round(Number(invoiceDetailRow?.invoice.subtotal_etb ?? 0) * Number(invoicePriceVersion.invoice_tax_rate) * 100) / 100;
   const invoiceDetailPayments = (data?.payments ?? []).filter((item) => item.invoice_id === invoiceDetailId);
   const selectedClient = clients.find((item) => item.id === selectedClientId);
   const clientLots =
     data?.lots.filter(
       (item) =>
-        item.client_id === selectedClientId && Number(item.quantity_kg) > 0,
+        item.client_id === selectedClientId,
     ) ?? [];
   const selectedLot = clientLots.find((item) => item.id === selectedLotId);
-  const activeRentRecords = (data?.storageRentRecords ?? []).filter((item) => item.status === "ACTIVE");
+  const activeRentRecords = (data?.storageRentRecords ?? []).filter((item) => item.status === "ACTIVE" && (!billingClientId || item.client_id === billingClientId));
   const selectedRentRecord = activeRentRecords.find((item) => item.id === selectedRentRecordId);
   const selectedLotCertified = Boolean(
     selectedLot?.certification_status === "VERIFIED" &&
@@ -313,14 +336,10 @@ export function FinanceOperations() {
   const tariff = data?.tariffs.find(
     (item) =>
       item.active &&
-      item.effective_from <= periodStart &&
-      (!item.effective_to || item.effective_to >= periodEnd),
+      (selectedRentRecord ? item.version_code === selectedRentRecord.tariff_version : item.effective_from <= periodStart),
   );
   const visibleTariff = tariff ?? data?.tariffs[0];
-  const visibleTariffLines =
-    data?.tariffLineItems.filter(
-      (item) => item.tariff_version_id === visibleTariff?.id,
-    ) ?? [];
+
   const storagePosted = Boolean(
     storage &&
     data?.storageRuns.some(
@@ -379,18 +398,24 @@ export function FinanceOperations() {
 
   function selectRentRecord(rentRecordId: string) {
     const record = activeRentRecords.find((item) => item.id === rentRecordId);
+    if (record?.storage_category === "EMPTY_BAGS") {
+      setMessage("Legacy empty-bag rent cannot use coffee-lot balances. Reconcile it with the empty-bag custody ledger before billing.");
+      return;
+    }
     setSelectedRentRecordId(rentRecordId);
     if (!record) return;
     setSelectedClientId(record.client_id);
+    setBillingClientId(record.client_id);
     setSelectedLotId(record.lot_id);
     setCategory(record.storage_category as StorageCategory);
-    setPeriodStart(nextStorageRentStart(record.charge_start_on, record.billed_through_on));
-    setPeriodEnd(today);
+    const start = nextStorageRentStart(record.charge_start_on, record.billed_through_on);
+    setPeriodStart(start);
+    setPeriodEnd(start > yesterday ? start : yesterday);
     clearStorageQuote();
   }
 
   async function prepareInvoiceDraft() {
-    if (!invoicePreparationIds.length) return;
+    if (!invoicePreparationIds.length || preparingInvoice) return;
     setPreparingInvoice(true);
     try {
       const draft = await createInvoiceDraft(invoicePreparationIds);
@@ -498,6 +523,7 @@ export function FinanceOperations() {
   }
 
   async function postStorage() {
+    if (storageBusy) return;
     if (!storage || !selectedRentRecord || !visibleTariff) return;
     if (!tariff) {
       setMessage(
@@ -505,6 +531,7 @@ export function FinanceOperations() {
       );
       return;
     }
+    setStorageBusy(true);
     try {
       const posted = await postStorageRentBilling({
         rentRecordId: selectedRentRecord.id,
@@ -512,8 +539,10 @@ export function FinanceOperations() {
         tariffVersion: visibleTariff.version_code,
       });
       await reloadFinance();
+      setBillingClientId(selectedRentRecord.client_id);
       setSelectedRentRecordId("");
       clearStorageQuote();
+      setTab("Unbilled Services");
       setMessage(
         `Storage billing run ${posted.storage_billing_run_id.slice(0, 8).toUpperCase()} posted for ${posted.period_start} to ${posted.period_end}.`,
       );
@@ -521,7 +550,7 @@ export function FinanceOperations() {
       setMessage(
         error instanceof Error ? error.message : "Storage billing run failed.",
       );
-    }
+    } finally { setStorageBusy(false); }
   }
 
   async function recordPayment(event: FormEvent<HTMLFormElement>) {
@@ -601,39 +630,33 @@ export function FinanceOperations() {
           </button>
         </div>
       )}
-      <WorkflowGuide
+      {tab !== "Rate Reference" && <WorkflowGuide
         title="Billing journey"
         steps={[
           {
             label: "Client account",
             help: "See why each client owes money",
-            state: tab === "Client Accounts" ? "current" : "done",
+            state: tab === "Client Accounts" ? "current" : "next",
           },
           {
             label: "Review charges",
-            help: "Check unbilled services and invoices",
-            state: ["Unbilled Services", "Invoices", "Storage Review"].includes(
+            help: "Check rent and completed services",
+            state: ["Unbilled Services", "Storage Review", "Add Service"].includes(
               tab,
             )
               ? "current"
-              : tab === "Client Accounts"
-                ? "next"
-                : "done",
+              : "next",
+          },
+          {
+            label: "Issue invoice",
+            help: "Review the total and payment due date",
+            state: tab === "Invoices" ? "current" : "next",
           },
           {
             label: "Record payment",
             help: "Allocate payment and attach slip",
             state:
-              tab === "Payments"
-                ? "current"
-                : [
-                      "Client Accounts",
-                      "Unbilled Services",
-                      "Invoices",
-                      "Storage Review",
-                    ].includes(tab)
-                  ? "next"
-                  : "done",
+              tab === "Payments" ? "current" : "next",
           },
           {
             label: "Statement",
@@ -641,7 +664,18 @@ export function FinanceOperations() {
             state: tab === "Client Statement" ? "current" : "next",
           },
         ]}
-      />
+      />}
+      <section className="billing-context">
+        <label>Billing client<select value={billingClientId} onChange={e => {
+          setBillingClientId(e.target.value); setStatementClientId(e.target.value);
+          setSelectedRentRecordId(""); clearStorageQuote();
+        }}><option value="">All clients</option>{clients.map(c => <option key={c.id} value={c.id}>{c.legal_name}</option>)}</select></label>
+        <div className="billing-actions">
+          <button className="secondary-button" onClick={() => setTab("Storage Review")}>Review rent</button>
+          <button className="secondary-button" onClick={() => setTab("Add Service")}>Add service</button>
+          <button className="primary-button" onClick={() => setTab("Unbilled Services")}>Prepare invoice</button>
+        </div>
+      </section>
       <div className="module-tabs billing-primary-tabs" role="tablist">
         {billingTabs.map((item) => (
           <button
@@ -657,6 +691,7 @@ export function FinanceOperations() {
         ))}
       </div>
 
+      {data && <div hidden={tab !== "Add Service"}><BillingServiceForm key={billingClientId} data={data} clientId={billingClientId} onClient={setBillingClientId} onSaved={reloadFinance} /></div>}
       {["Client Accounts", "Unbilled Services", "Invoices"].includes(tab) && (
         <section
           className="filter-toolbar billing-filter-toolbar"
@@ -678,20 +713,6 @@ export function FinanceOperations() {
               value={billingTo}
               onChange={(event) => setBillingTo(event.target.value)}
             />
-          </label>
-          <label>
-            Client
-            <select
-              value={billingClientId}
-              onChange={(event) => setBillingClientId(event.target.value)}
-            >
-              <option value="">All clients</option>
-              {clients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.legal_name}
-                </option>
-              ))}
-            </select>
           </label>
           <label className="filter-search">
             <Search size={15} />
@@ -763,7 +784,7 @@ export function FinanceOperations() {
             <div className="table-head">
               <span>Client</span>
               <span>Period unbilled</span>
-              <span>Period invoiced</span>
+              <span>Draft / invoiced</span>
               <span>Period paid</span>
               <span>Current outstanding</span>
               <span>Oldest unpaid</span>
@@ -785,8 +806,8 @@ export function FinanceOperations() {
                   <strong>{account.client.legal_name}</strong>
                   <small>{account.client.code}</small>
                 </span>
-                <span>ETB {account.unbilled.toLocaleString()}</span>
-                <span>ETB {account.billed.toLocaleString()}</span>
+                <span>ETB {account.unbilled.toLocaleString()}<small>Accrued rent ETB {account.accrued.toLocaleString()}{account.rents.some(r => r.error) ? " · Rent needs review" : ""}</small></span>
+                <span><strong>Draft ETB {account.draft.toLocaleString()}</strong><small>Invoiced ETB {account.billed.toLocaleString()}</small></span>
                 <span>ETB {account.paid.toLocaleString()}</span>
                 <span>
                   <strong
@@ -804,7 +825,7 @@ export function FinanceOperations() {
                       ? "Overdue"
                       : account.outstanding > 0
                         ? "Open"
-                        : "Clear"}
+                        : billingAccountStatus(account.outstanding, account.draft, account.unbilled, account.rentPending).replaceAll("_", " ")}
                   </small>
                 </span>
                 <span>
@@ -1129,7 +1150,9 @@ export function FinanceOperations() {
         </div>
       )}
 
-      {tab === "Storage Review" && (
+      {tab === "Storage Review" && data && <RentOverview data={data} clientId={billingClientId} onReload={reloadFinance} onReview={id => { selectRentRecord(id); }} />}
+      {tab === "Storage Review" && data && <EmptyBagBilling key={billingClientId} data={data} clientId={billingClientId} focusId={focusId} onPosted={reloadFinance} />}
+      {tab === "Storage Review" && selectedRentRecordId && (
         <div className="storage-layout">
           <section className="storage-controls">
             <header>
@@ -1226,7 +1249,6 @@ export function FinanceOperations() {
                     Grade-improvement coffee
                   </option>
                   <option value="REJECT">Reject coffee</option>
-                  <option value="EMPTY_BAGS">Empty bags</option>
                 </select>
               </label>
               <div className={`certification-billing-control ${selectedLotCertified ? "verified" : "standard"}`}>
@@ -1273,6 +1295,7 @@ export function FinanceOperations() {
                 {storageError}
               </div>
             )}
+            <p className="billing-notice">Post through yesterday. Today’s rent is an estimate until movements are complete.</p>
             <div className="storage-summary">
               <div>
                 <span>Billable days</span>
@@ -1299,7 +1322,7 @@ export function FinanceOperations() {
               className="primary-button"
               type="button"
               onClick={postStorage}
-              disabled={!storage || !tariff || !selectedRentRecord || storagePosted}
+              disabled={!storage || !tariff || !selectedRentRecord || storagePosted || storageBusy || periodEnd > yesterday}
             >
               <FileCheck2 size={16} />
               {storagePosted
@@ -1536,67 +1559,7 @@ export function FinanceOperations() {
         </>
       )}
 
-      {tab === "Rate Reference" && (
-        <>
-          <div className="tariff-warning">
-            <AlertTriangle size={18} />
-            <div>
-              <strong>
-                {visibleTariff
-                  ? `${visibleTariff.version_code} database rate record`
-                  : "Rate posting is locked"}
-              </strong>
-              <p>
-                {tariff
-                  ? "Agreement 001/2018 rates are active. Three-month bands use a 30-day month."
-                  : "No active tariff covers the selected billing period."}
-              </p>
-            </div>
-            <ShieldCheck size={18} />
-          </div>
-          <section className="tariff-grid">
-            {storageCategories.map((storageCategory) => {
-              const lines = visibleTariffLines.filter(
-                (line) => line.category === storageCategory.id,
-              );
-              return (
-              <article className={lines.length ? "" : "missing"} key={storageCategory.id}>
-                <ReceiptText size={18} />
-                <span>
-                  <strong>{storageCategory.label}</strong>
-                  {lines.length ? lines.map((line) => (
-                    <small key={line.id}>
-                      Day {line.age_start_days} to {line.age_end_days ?? "onward"}{" "}
-                      · ETB {Number(line.daily_rate_per_unit).toLocaleString()} / {storageCategory.unit}
-                      {line.certified ? " · Certified" : " · Standard"}
-                      {line.source_clause ? ` · Clause ${line.source_clause}${line.source_pdf_page ? `, PDF p.${line.source_pdf_page}` : ""}` : ""}
-                    </small>
-                  )) : <small>{storageCategory.missingNote ?? "No rate configured"}</small>}
-                </span>
-              </article>
-              );
-            })}
-          </section>
-          {visibleTariffLines.length === 0 && (
-            <p className="empty-result">
-              No storage rates are stored yet. Finance must enter the real rates
-              from the signed agreement before rent can be calculated.
-            </p>
-          )}
-          <div className="locked-action">
-            <LockKeyhole size={16} />
-            <span>
-              <strong>
-                Tax and automatic invoice issuance remain disabled
-              </strong>
-              <small>
-                Activate only after finance approves the agreement transcription
-                and tax mapping.
-              </small>
-            </span>
-          </div>
-        </>
-      )}
+      {tab === "Rate Reference" && data && <BillingPriceVersions data={data} onReload={reloadFinance} />}
       {selectedService && (
         <RecordDetailDrawer
           open
@@ -1616,6 +1579,9 @@ export function FinanceOperations() {
             { label: "Source type", value: (selectedService.reference_type ?? "Service record").replaceAll("_", " ") },
             { label: "Source record", value: selectedService.reference_id?.slice(0, 8).toUpperCase() ?? "Manual service" },
           ]} />
+          {selectedService.service_type === "STORAGE" && selectedService.reference_id && (selectedService.reference_type === "EMPTY_BAG_CHARGE_RUN"
+            ? <SavedBagChargeCalculation key={selectedService.reference_id} runId={selectedService.reference_id} />
+            : <SavedRentCalculation key={selectedService.reference_id} runId={selectedService.reference_id} />)}
           <p className="drawer-explainer">This is work awaiting invoice preparation, not a payment. Payment is recorded only after finance issues an invoice.</p>
           <EvidenceUploader reference={{ type: selectedService.reference_type ?? "SERVICE_EVENT", id: selectedService.reference_id ?? selectedService.id, label: selectedService.description }} documentType="SERVICE_EVIDENCE" label="Service evidence" help="Attach the job card, voucher, receipt, or approved worksheet." />
         </RecordDetailDrawer>
@@ -1646,6 +1612,9 @@ export function FinanceOperations() {
                 <span><strong>{line.service_type?.replaceAll("_", " ") ?? line.description}</strong><small>{line.description}</small></span>
                 <span>{Number(line.quantity).toLocaleString()} × ETB {Number(line.rate_etb).toLocaleString()}</span>
                 <strong>ETB {Number(line.amount_etb ?? Number(line.quantity) * Number(line.rate_etb)).toLocaleString()}</strong>
+                {line.service_type === "STORAGE" && line.reference_id && (line.reference_type === "EMPTY_BAG_CHARGE_RUN"
+                  ? <SavedBagChargeCalculation runId={line.reference_id} />
+                  : <SavedRentCalculation runId={line.reference_id} />)}
               </div>
             ))}
             {!invoiceDetailRow.invoice.line_snapshot.length && <p className="empty-result">This invoice has no service lines.</p>}
@@ -1656,7 +1625,19 @@ export function FinanceOperations() {
             ))}
             {!invoiceDetailPayments.length && <p className="empty-result">No payment has been recorded for this invoice.</p>}
           </DetailSection>
-          {invoiceDetailRow.invoice.status === "DRAFT" && <p className="drawer-explainer">This is a persisted invoice preparation. It cannot receive payment until finance verifies tax and issues it.</p>}
+          {invoiceDetailRow.invoice.status === "DRAFT" && <div className="billing-form">
+            <p>This draft totals ETB {Number(invoiceDetailRow.invoice.total_etb).toLocaleString()}. It becomes payable when issued.</p>
+            <label>Payment due date<input type="date" min={today} value={invoiceDue} onChange={e => setInvoiceDue(e.target.value)} /></label>
+            {issueTax !== null && <p className="billing-total">On issue: subtotal ETB {Number(invoiceDetailRow.invoice.subtotal_etb).toLocaleString()} + tax ETB {issueTax.toLocaleString()} = ETB {(Number(invoiceDetailRow.invoice.subtotal_etb) + issueTax).toLocaleString()}</p>}
+            {issueTax === null || !invoicePriceVersion?.verified_by_2
+              ? <p className="billing-notice">Invoice issuance needs a verified tax rate on this agreement’s price version. No tax rate has been assumed.</p>
+              : <button className="primary-button" disabled={issuing} onClick={async () => {
+                setIssuing(true);
+                try { await issuePreparedInvoice(invoiceDetailRow.invoice.id, invoiceDue); await reloadFinance(); setMessage("Invoice issued. Record payment from this invoice."); }
+                catch(e) { setMessage(e instanceof Error ? e.message : "Invoice could not be issued."); }
+                finally { setIssuing(false); }
+              }}>{issuing ? "Issuing…" : "Issue invoice"}</button>}
+          </div>}
         </RecordDetailDrawer>
       )}
       {openAccount && (
@@ -1667,7 +1648,7 @@ export function FinanceOperations() {
           subtitle={`${openAccount.client.code} · period ${billingFrom || "Beginning"} to ${billingTo || "Today"}`}
           status={
             <Status
-              value={openAccount.outstanding > 0 ? "OUTSTANDING" : "CLEAR"}
+              value={billingAccountStatus(openAccount.outstanding, openAccount.draft, openAccount.unbilled, openAccount.rentPending)}
             />
           }
           onClose={() => setAccountClientId("")}
@@ -1693,6 +1674,14 @@ export function FinanceOperations() {
                 value: `ETB ${openAccount.unbilled.toLocaleString()}`,
               },
               {
+                label: "Accrued rent through yesterday",
+                value: `ETB ${openAccount.accrued.toLocaleString()}${openAccount.rents.some(r => r.error) ? " · Some lots need review" : ""}`,
+              },
+              {
+                label: "Draft invoices",
+                value: `ETB ${openAccount.draft.toLocaleString()}`,
+              },
+              {
                 label: "Period invoiced",
                 value: `ETB ${openAccount.billed.toLocaleString()}`,
               },
@@ -1708,7 +1697,7 @@ export function FinanceOperations() {
           />
           <DetailSection
             title="Why this client owes money"
-            help="Review the invoice or record its remaining payment directly."
+            help="Draft totals are pending. Amount due includes issued invoices only."
           >
             {openAccount.invoices.length ? (
               openAccount.invoices.map((row) => (
@@ -1717,7 +1706,7 @@ export function FinanceOperations() {
                     <strong>{row.invoice.invoice_number}</strong>
                     <small>Due {row.invoice.due_on ?? "not set"}</small>
                   </span>
-                  <span>ETB {row.outstanding.toLocaleString()}</span>
+                  <span>ETB {Number(row.invoice.status === "DRAFT" ? row.invoice.total_etb : row.outstanding).toLocaleString()}{row.invoice.status === "DRAFT" ? " draft" : ""}</span>
                   <Status
                     value={
                       row.outstanding === 0

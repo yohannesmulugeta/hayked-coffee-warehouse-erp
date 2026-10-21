@@ -65,3 +65,27 @@ test("draft invoices keep their draft label even though they are not debt", () =
   assert.equal(financeRules.invoiceDisplayStatus("ISSUED", 0), "PAID");
   assert.equal(financeRules.invoiceDisplayStatus("ISSUED", 250), "ISSUED");
 });
+test("warehouse billing dates cross midnight consistently in Addis Ababa", () => {
+  assert.equal(financeRules.billingDate(0, new Date("2026-09-08T21:01:00Z")), "2026-09-09");
+  assert.equal(financeRules.billingDate(-1, new Date("2026-09-08T21:01:00Z")), "2026-09-08");
+});
+
+test("account status exposes prepared work and rent awaiting review", () => {
+  assert.equal(financeRules.billingAccountStatus(0, 899, 0, false), "DRAFT_PENDING");
+  assert.equal(financeRules.billingAccountStatus(0, 0, 100, false), "UNBILLED_WORK");
+  assert.equal(financeRules.billingAccountStatus(0, 0, 0, true), "RENT_REVIEW");
+  assert.equal(financeRules.billingAccountStatus(50, 899, 0, true), "OUTSTANDING");
+});
+
+test("processing uses the receiving agreement even after a new agreement starts", () => {
+  const data = {
+    processingOrders: [{id:"order", lot_id:"lot"}], lots:[{id:"lot",receipt_id:"receipt"}],
+    receipts:[{id:"receipt",agreement_id:"old"}], rentOverview:[],
+    agreements:[
+      {id:"old",client_id:"client",status:"EXPIRED",effective_from:"2026-01-01",effective_to:"2026-06-30",tariff_version:"OLD"},
+      {id:"new",client_id:"client",status:"ACTIVE",effective_from:"2026-07-01",effective_to:null,tariff_version:"NEW"}
+    ]
+  };
+  assert.equal(financeRules.serviceAgreementVersion(data,"client","2026-09-09","order"),"OLD");
+  assert.equal(financeRules.serviceAgreementVersion(data,"client","2026-09-09",""),"NEW");
+});

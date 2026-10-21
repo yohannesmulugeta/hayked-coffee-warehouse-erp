@@ -32,6 +32,8 @@ import {
   type DispatchData,
   type DispatchRow,
 } from "@/lib/erp-data";
+import { QuantityCheckPanel } from "./quantity-check-panel";
+import { cancelUnpostedDispatch } from "@/lib/quantity-checks";
 
 export const dispatchViews = ["Dispatch", "Ownership Transfers"];
 type Tab =
@@ -91,15 +93,18 @@ function Empty({ title, copy }: { title: string; copy: string }) {
 
 export function DispatchOperations({
   activeView,
+  focusId,
   onNavigate,
 }: {
   activeView: string;
+  focusId?: string;
   onNavigate?: (intent: { view: string; reportType?: "Dispatch" }) => void;
 }) {
   const [tab, setTab] = useState<Tab>("New dispatch");
   const [message, setMessage] = useState("");
   const [data, setData] = useState<DispatchData | null>(null);
   const [selectedDispatchId, setSelectedDispatchId] = useState("");
+  const [dispatchCancelReason, setDispatchCancelReason] = useState("");
   const [selectedClientId, setSelectedClientId] = useState("");
   const [lines, setLines] = useState<DispatchLineDraft[]>([newLine()]);
   const [useCredit, setUseCredit] = useState(false);
@@ -171,6 +176,12 @@ export function DispatchOperations({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload();
   }, []);
+  useEffect(() => {
+    if (!focusId || !data?.dispatches.some((item) => item.id === focusId)) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- restore a direct record link after data loads
+    setSelectedDispatchId(focusId);
+    setTab("Dispatches");
+  }, [data, focusId]);
 
   const clients = data?.clients ?? [];
   const lots = data?.lots ?? [];
@@ -413,6 +424,18 @@ export function DispatchOperations({
       setMessage(
         error instanceof Error ? error.message : "Dispatch action failed.",
       );
+    }
+  }
+
+  async function cancelDispatchForCorrection() {
+    if (!selectedDispatch || dispatchCancelReason.trim().length < 5) return;
+    try {
+      await cancelUnpostedDispatch(selectedDispatch.id, dispatchCancelReason.trim());
+      setDispatchCancelReason("");
+      await reload();
+      setMessage(`${selectedDispatch.dispatch_number} cancelled and its stock reservations released. Reconcile the physical shortage before creating a corrected dispatch.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Dispatch cancellation failed.");
     }
   }
 
@@ -1241,21 +1264,13 @@ export function DispatchOperations({
                     Approve dispatch
                   </button>
                 )}
-                {selectedDispatch.status === "APPROVED" && (
-                  <button
-                    className="primary-button"
-                    type="button"
-                    disabled={!ready}
-                    onClick={() => advanceDispatch("post_dispatch_v2")}
-                  >
-                    <Truck size={15} />
-                    Post dispatch
-                  </button>
-                )}
+                {selectedDispatch.status === "APPROVED" && <span>Record the actual exit count and weight below.</span>}
                 {selectedDispatch.status === "POSTED" && (
                   <Status value="POSTED" />
                 )}
               </div>
+              {selectedDispatch.status === "APPROVED" && <QuantityCheckPanel key={selectedDispatch.id} stage="DISPATCH_EXIT" referenceId={selectedDispatch.id} expectedKg={Number(selectedDispatch.quantity_kg)} expectedBags={selectedDispatch.bag_count} canRecord onChanged={reload} />}
+              {selectedDispatch.status === "APPROVED" && <section className="record-panel"><h3>Exit quantity differs?</h3><p>The dispatch stays on hold. Cancel it to release reservations, investigate the source lot, then prepare a corrected dispatch.</p><label>Cancellation reason<textarea value={dispatchCancelReason} onChange={(event) => setDispatchCancelReason(event.target.value)} minLength={5} /></label><button type="button" className="secondary-button" disabled={dispatchCancelReason.trim().length < 5} onClick={() => void cancelDispatchForCorrection()}>Cancel unposted dispatch</button></section>}
             </section>
             <aside className={`release-score ${ready ? "ready" : "blocked"}`}>
               <div>

@@ -13,29 +13,29 @@ export type AppRole = (typeof appRoles)[number];
 const viewAccess: Record<AppRole, ReadonlySet<string>> = {
   system_admin: new Set(["*"]),
   warehouse_manager: new Set([
-    "Dashboard", "Clients", "Warehouse Receipts", "Coffee Lots", "Processing",
+    "Dashboard", "Clients", "Warehouse Receipts", "Coffee Lots", "Processing", "Laboratory",
     "Dispatch", "Labour", "Finance", "Reports", "Approvals", "Agreements",
     "Representatives", "Storage Loss", "Ownership Transfers", "Bag Control",
     "Generator Requests", "Documents", "Audit History", "Arrears Cases",
   ]),
   warehouse_officer: new Set([
-    "Dashboard", "Clients", "Warehouse Receipts", "Coffee Lots", "Processing",
+    "Dashboard", "Clients", "Warehouse Receipts", "Coffee Lots", "Processing", "Laboratory",
     "Dispatch", "Labour", "Reports", "Representatives", "Storage Loss",
     "Ownership Transfers", "Bag Control", "Generator Requests", "Documents",
   ]),
   processing_supervisor: new Set([
-    "Dashboard", "Clients", "Coffee Lots", "Processing", "Labour", "Reports",
+    "Dashboard", "Clients", "Coffee Lots", "Processing", "Laboratory", "Labour", "Reports",
     "Approvals", "Storage Loss", "Generator Requests", "Documents",
   ]),
   finance_officer: new Set([
-    "Dashboard", "Clients", "Coffee Lots", "Finance", "Reports", "Approvals",
+    "Dashboard", "Clients", "Coffee Lots", "Laboratory", "Finance", "Reports", "Approvals",
     "Agreements", "Documents", "Audit History", "Arrears Cases",
   ]),
   auditor: new Set([
-    "Dashboard", "Clients", "Coffee Lots", "Reports", "Agreements", "Documents",
+    "Dashboard", "Clients", "Coffee Lots", "Laboratory", "Reports", "Agreements", "Documents",
     "Audit History", "Arrears Cases",
   ]),
-  viewer: new Set(["Dashboard", "Clients", "Coffee Lots", "Reports", "Documents"]),
+  viewer: new Set(["Dashboard", "Clients", "Coffee Lots", "Laboratory", "Reports", "Documents"]),
 };
 
 export function normalizeAppRole(role: string): AppRole {

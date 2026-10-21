@@ -41,3 +41,10 @@ test("processing actions are role-aware and system administrators can perform ev
     assert.equal(permissions.canPerformProcessingAction("warehouse_officer", action), false, action);
   }
 });
+
+test("laboratory is visible to staff without granting edit rights through navigation", () => {
+  for (const role of ["system_admin", "warehouse_manager", "processing_supervisor", "auditor", "viewer"]) {
+    assert.equal(canAccessView(role, "Laboratory"), true, role);
+  }
+  assert.equal(canAccessView("viewer", "Processing"), false);
+});

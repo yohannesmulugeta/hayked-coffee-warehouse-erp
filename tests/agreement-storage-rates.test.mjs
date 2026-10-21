@@ -51,9 +51,9 @@ test("legacy demo bands are replaced only while the tariff is unverified", () =>
 });
 
 test("Rates page shows the agreement clause and 30-day interpretation", () => {
-  const source = readFileSync("app/finance-operations.tsx", "utf8");
+  const source = readFileSync("app/billing-workspace.tsx", "utf8");
   assert.match(source, /source_clause/);
   assert.match(source, /Agreement 001\/2018/);
   assert.match(source, /30-day month/);
-  assert.match(source, /No separate rate identified in Agreement 001\/2018/);
+  assert.match(source, /Free periods remain as agreed/);
 });

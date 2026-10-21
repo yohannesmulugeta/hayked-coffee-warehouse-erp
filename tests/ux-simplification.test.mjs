@@ -127,7 +127,7 @@ test("daily work has direct, plain-language actions and complete finance evidenc
   assert.match(finance, /Transaction \/ receipt reference/);
   assert.match(finance, /Payer name/);
   assert.match(finance, /Full client account/);
-  assert.match(finance, /database rate record/i);
+  assert.match(finance, /BillingPriceVersions/);
 });
 
 test("client readiness can be completed later and receipt self-approval is explained before action", async () => {

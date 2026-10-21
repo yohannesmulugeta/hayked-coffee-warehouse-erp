@@ -37,6 +37,7 @@ export function stockMatches(lot: CoffeeLot, type: StockTypeFilter, status: Stoc
 
 export function notificationTarget(label: string) {
   if (/approval/i.test(label)) return { view: "Approvals" };
+  if (/bag charge/i.test(label)) return { view: "Finance", financeTab: "Storage Review" as const };
   if (/agreement/i.test(label)) return { view: "Agreements" };
   if (/processing|allowance/i.test(label)) return { view: "Processing", processingState: "Waiting Approval" as ProcessingStateFilter };
   if (/invoice|unpaid/i.test(label)) return { view: "Finance" };

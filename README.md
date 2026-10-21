@@ -8,6 +8,8 @@ The repository contains a connected Next.js/React warehouse ERP with Supabase/Po
 
 Phase 1 adds database-authoritative posting guards, role-aware navigation, truthful database failure states, approved service-rate controls, health checking, database tests, and CI. Phase 2 adds route-level feature loading, a client-bundle budget, accessibility improvements, responsive navigation behavior, clearer operational wording, and current tooling versions.
 
+The Laboratory workspace records independent coffee samples, physical and cup assessments, independently approved versioned PDFs, and controlled client email. See [Laboratory workflow](docs/LABORATORY_WORKFLOW.md) for setup and delivery limits.
+
 ```powershell
 npm run dev
 ```

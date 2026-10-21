@@ -19,7 +19,7 @@ import {
   ThumbsUp,
   X,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   evaluateOutputCompletion,
   validateProcessingRequest,
@@ -33,19 +33,20 @@ import {
 } from "./processing-workflow";
 import {
   approveProcessingRequest,
-  completeProcessingOrder,
   createProcessingRequest,
   listEligibleProcessingLots,
   loadProcessingData,
   queueApprovedProcessingRequest,
   rejectProcessingRequest,
   saveEcxCheck,
-  startProcessingOrder,
   submitProcessingRequest,
   type EcxCheckRow,
   type ProcessingData,
   type EligibleProcessingLot,
 } from "@/lib/erp-data";
+import { cancelQueuedProcessingOrder, submitQuantityCheck } from "@/lib/quantity-checks";
+import { QuantityCheckPanel } from "./quantity-check-panel";
+import { SpecialJobs } from "./special-jobs";
 import type { ProcessingStateFilter } from "./ux-rules";
 import { canPerformProcessingAction, normalizeAppRole } from "./role-permissions";
 import {
@@ -62,7 +63,8 @@ type Tab =
   | "Intake"
   | "Completion"
   | "Output Lots"
-  | "Exceptions";
+  | "Exceptions"
+  | "Special Jobs";
 type QueueItem = {
   databaseId: string;
   id: string;
@@ -843,10 +845,12 @@ function ProcessingRequestDetail({
 
 export function ProcessingOperations({
   initialState = "All",
+  focusId,
   role = "viewer",
   userId = "",
 }: {
   initialState?: ProcessingStateFilter;
+  focusId?: string;
   role?: string;
   userId?: string;
 }) {
@@ -864,10 +868,13 @@ export function ProcessingOperations({
   const [editingInputKey, setEditingInputKey] = useState<number | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [detailOrderId, setDetailOrderId] = useState("");
+  const appliedFocusId = useRef("");
   const [requestDetailId, setRequestDetailId] = useState("");
   const [outputLines, setOutputLines] = useState<ProcessingOutputLine[]>([]);
   const [exceptionApproved, setExceptionApproved] = useState(false);
   const [evidencePath, setEvidencePath] = useState("");
+  const [checkRevision, setCheckRevision] = useState(0);
+  const [cancelReason, setCancelReason] = useState("");
   const [message, setMessage] = useState("");
   const [databaseError, setDatabaseError] = useState("");
   const canCreate = canPerformProcessingAction(role, "create");
@@ -1006,6 +1013,21 @@ export function ProcessingOperations({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload();
   }, []);
+  useEffect(() => {
+    if (!focusId || !data || appliedFocusId.current === focusId) return;
+    appliedFocusId.current = focusId;
+    const order = data.orders.find((item) => item.id === focusId);
+    if (order) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- restore a direct record link after data loads
+      setTab(order.status === "IN_PROCESS" || order.status === "POSTED" ? "Active Orders" : "Queue");
+      setDetailOrderId(order.id);
+    } else if (data.requests.some((item) => item.id === focusId)) {
+      setTab("Requests");
+      setRequestDetailId(focusId);
+    } else {
+      setTab("Special Jobs");
+    }
+  }, [data, focusId]);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setStateFilter(initialState);
@@ -1171,10 +1193,10 @@ export function ProcessingOperations({
     if (!item) return;
     const form = new FormData(event.currentTarget);
     try {
-      await startProcessingOrder(item.databaseId, {
+      const intake = {
         intakeAt: new Date(String(form.get("intakeAt"))).toISOString(),
-        inputBags: item.inputBags,
-        inputKg: item.inputKg,
+        inputBags: Number(form.get("measuredBags")),
+        inputKg: Number(form.get("measuredKg")),
         scaleReference: String(form.get("scaleReference")),
         warehouseIssueReference: String(form.get("warehouseIssueReference")),
         machineLine: String(form.get("machineLine")),
@@ -1183,11 +1205,16 @@ export function ProcessingOperations({
         clientMonitorName: String(form.get("clientMonitorName") ?? ""),
         intakeCondition: String(form.get("intakeCondition")),
         evidencePath: String(form.get("evidencePath") ?? ""),
+      };
+      await submitQuantityCheck({
+        stage: "PROCESSING_INTAKE", referenceId: item.databaseId,
+        measuredKg: intake.inputKg, measuredBags: intake.inputBags,
+        evidenceReference: intake.evidencePath,
+        differenceReason: String(form.get("differenceReason") ?? ""),
+        payload: intake,
       });
-      await reload();
-      setMessage(`${item.id} intake posted and source stock issued once.`);
-      setTab("Requests");
-      setStateFilter("In Progress");
+      setCheckRevision((value) => value + 1);
+      setMessage(`${item.id} measured intake sent for independent verification. Stock has not moved yet.`);
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Intake submission failed.",
@@ -1195,35 +1222,28 @@ export function ProcessingOperations({
     }
   }
 
+  async function cancelIntakeOrder() {
+    const item = queue.find((entry) => entry.databaseId === selectedOrderId);
+    if (!item || cancelReason.trim().length < 5) return;
+    try {
+      await cancelQueuedProcessingOrder(item.databaseId, cancelReason);
+      await reload();
+      setCancelReason("");
+      setMessage(`${item.id} cancelled and its reservation released. Resolve the physical stock difference before making a new request.`);
+      setTab("Requests");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Order cancellation failed.");
+    }
+  }
+
   function openCompletion(item: Order) {
     setSelectedOrderId(item.databaseId);
-    const washed = item.coffeeType === "Washed";
     setOutputLines([
       {
-        ...newOutputLine(
-          "ACCEPTED_CLIENT_COFFEE",
-          item.inputKg * (washed ? 0.775 : 0.975),
-        ),
-        coffeeType: washed ? "WASHED" : "UNWASHED_UG",
+        ...newOutputLine("ACCEPTED_CLIENT_COFFEE"),
+        coffeeType: item.coffeeType === "Washed" ? "WASHED" : "UNWASHED_UG",
         grade: item.grade,
         preparation: "Export preparation",
-        warehouseSection: "Processed stock",
-      },
-      ...(washed
-        ? [
-            {
-              ...newOutputLine("HAYKED_BYPRODUCT", item.inputKg * 0.2),
-              coffeeType: "WASHED" as const,
-              grade: "Byproduct",
-              preparation: "Parchment",
-              warehouseSection: "Byproduct store",
-            },
-          ]
-        : []),
-      {
-        ...newOutputLine("PROCESS_LOSS", item.inputKg * 0.025),
-        coffeeType: washed ? "WASHED" : "UNWASHED_UG",
-        reason: "Processing difference",
       },
     ]);
     setExceptionApproved(false);
@@ -1248,28 +1268,25 @@ export function ProcessingOperations({
       setMessage(completion.errors[0] ?? "Select an active processing order.");
       return;
     }
-    if (
-      (completion.aboveAllowance ||
-        (selectedOrder.coffeeType === "Unwashed / UG" &&
-          completion.totals.HAYKED_BYPRODUCT > 0)) &&
-      !evidencePath.trim()
-    ) {
-      setMessage("Approved exceptions require an evidence reference.");
+    if (!evidencePath.trim()) {
+      setMessage("Enter the output weighing evidence reference.");
       return;
     }
     try {
-      await completeProcessingOrder(
-        selectedOrder.databaseId,
-        outputLines,
-        exceptionApproved,
-        evidencePath,
-      );
-      await reload();
+      const physical = outputLines.filter((line) => line.category !== "PROCESS_LOSS");
+      const lossReason = outputLines.filter((line) => line.category === "PROCESS_LOSS")
+        .map((line) => line.reason.trim()).filter(Boolean).join("; ");
+      await submitQuantityCheck({
+        stage: "PROCESSING_OUTPUT", referenceId: selectedOrder.databaseId,
+        measuredKg: physical.reduce((sum, line) => sum + line.quantityKg, 0),
+        measuredBags: physical.reduce((sum, line) => sum + line.bagCount, 0),
+        evidenceReference: evidencePath, differenceReason: lossReason,
+        payload: { lines: outputLines, lossReason, exceptionApproved },
+      });
+      setCheckRevision((value) => value + 1);
       setMessage(
-        `${selectedOrder.id} completed and locked with ${outputLines.length} traceable outputs.`,
+        `${selectedOrder.id} output measurements sent for independent approval. Stock has not been created yet.`,
       );
-      setTab("Requests");
-      setStateFilter("Completed");
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -1540,6 +1557,7 @@ export function ProcessingOperations({
               >
                 Exceptions
               </button>
+              <button className="secondary-button" type="button" onClick={() => setTab("Special Jobs")}>Rebag / blend</button>
             </div>
           </section>
           <section className="record-panel">
@@ -2058,6 +2076,7 @@ export function ProcessingOperations({
 
       {tab === "Intake" &&
         (currentQueueItem ? (
+          <>
           <form className="operation-form" onSubmit={submitIntake}>
             <header>
               <div>
@@ -2080,6 +2099,8 @@ export function ProcessingOperations({
               </select>
             </header>
             <div className="form-grid compact">
+              <label>Actually counted bags<input name="measuredBags" type="number" min="0" required /></label>
+              <label>Actually weighed kg<input name="measuredKg" type="number" min="0" step="0.001" required /></label>
               <label>
                 Intake date and time
                 <input
@@ -2130,8 +2151,10 @@ export function ProcessingOperations({
                 <input
                   name="evidencePath"
                   placeholder="Scale ticket or document reference"
+                  required
                 />
               </label>
+              <label className="wide">Difference explanation<textarea name="differenceReason" placeholder="Required if measured intake differs from the queued order" /></label>
               <label>
                 Client monitor name
                 <input name="clientMonitorName" />
@@ -2144,10 +2167,13 @@ export function ProcessingOperations({
             <footer>
               <button className="primary-button" type="submit">
                 <Scale size={16} />
-                Post intake and issue stock
+                Send measured intake for verification
               </button>
             </footer>
           </form>
+          <QuantityCheckPanel key={`intake-${currentQueueItem.databaseId}`} stage="PROCESSING_INTAKE" referenceId={currentQueueItem.databaseId} expectedKg={currentQueueItem.inputKg} expectedBags={currentQueueItem.inputBags} refreshKey={checkRevision} onChanged={reload} />
+          <section className="record-panel"><h3>Intake difference unresolved?</h3><p>Cancel the unstarted order to release its reservation. Investigate and correct the source lot before creating a new request.</p><label>Cancellation reason<textarea value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} minLength={5} /></label><button type="button" className="secondary-button" disabled={cancelReason.trim().length < 5} onClick={() => void cancelIntakeOrder()}>Cancel unstarted order</button></section>
+          </>
         ) : (
           <Empty
             title="No queued order needs intake"
@@ -2253,6 +2279,7 @@ export function ProcessingOperations({
 
       {tab === "Completion" &&
         (selectedOrder && selectedOrder.status === "IN_PROCESS" ? (
+          <>
           <form className="completion-layout" onSubmit={submitCompletion}>
             <section className="completion-form">
               <header>
@@ -2546,16 +2573,20 @@ export function ProcessingOperations({
                 disabled={!completion.valid}
               >
                 <ShieldCheck size={17} />
-                Post and lock completion
+                Send measured outputs for approval
               </button>
             </aside>
           </form>
+          <QuantityCheckPanel key={`output-${selectedOrder.databaseId}`} stage="PROCESSING_OUTPUT" referenceId={selectedOrder.databaseId} expectedKg={selectedOrder.inputKg} expectedBags={selectedOrder.inputBags} refreshKey={checkRevision} onChanged={reload} />
+          </>
         ) : (
           <Empty
             title="No active order is selected"
             text="Record intake for a queued order, then open its outputs from Active Orders."
           />
         ))}
+
+      {tab === "Special Jobs" && <SpecialJobs data={data} focusId={focusId} onChanged={reload} canSubmit={["system_admin", "warehouse_manager", "processing_supervisor"].includes(normalizeAppRole(role))} canApprove={["system_admin", "warehouse_manager"].includes(normalizeAppRole(role))} />}
 
       {tab === "Output Lots" && (
         <section className="record-panel">
