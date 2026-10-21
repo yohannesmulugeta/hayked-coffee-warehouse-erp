@@ -119,6 +119,7 @@ export function EmptyBagBilling({ data, clientId, onPosted }: {
 
   return <section className="billing-card" aria-label="Empty client-owned bag charges">
     <header><div><h2>Empty jute-bag storage</h2><p>Article 16 uses actual custody, each receipt’s age, and proportional 50-bag units. Held and damaged bags still occupy storage.</p></div></header>
+    <p className="billing-notice">Testing release on the live database: calculate and post charges only for real client custody records. An independently verified tariff and separate review are required before posting.</p>
     <form className="billing-form" onSubmit={calculate}>
       <div className="billing-form-grid">
         <label>Client<select required value={client} onChange={(event) => { setClient(event.target.value); setAgreement(""); setQuote(null); setRuns([]); setError(""); setMessage(""); }}>
