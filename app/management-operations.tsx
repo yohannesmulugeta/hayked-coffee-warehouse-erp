@@ -28,8 +28,11 @@ import {
   decideApproval,
   getBusinessDocumentUrl,
   loadManagementData,
+  loadViewOverrides,
   loadReportTable,
   updateProfile,
+  setViewOverride,
+  type ViewOverride,
   uploadBusinessDocument,
   type ApprovalRow,
   type ArrearsCaseRow,
@@ -39,6 +42,7 @@ import {
   type ReportTable,
   type ReportType,
 } from "@/lib/erp-data";
+import { canAccessView, configurableViews } from "./role-permissions";
 import {
   DetailGrid,
   DetailSection,
@@ -66,6 +70,14 @@ const roles = [
   "auditor",
   "viewer",
 ];
+const reportViews: Record<ReportType, string> = {
+  Stock: "Coffee Lots", Receipts: "Warehouse Receipts", Processing: "Processing",
+  Dispatch: "Dispatch", "Quantity Issues": "Warehouse Receipts", Billing: "Finance",
+  "Storage Loss": "Storage Loss", Bags: "Bag Control", Labour: "Labour",
+  Generator: "Generator Requests", Arrears: "Arrears Cases", Documents: "Documents",
+  Audit: "Audit History",
+};
+const reportTypes = Object.keys(reportViews) as ReportType[];
 type ApprovalItem = ApprovalRow & {
   reference: string;
   request: string;
@@ -121,12 +133,14 @@ export function ManagementOperations({
   onNavigate,
   onReviewsChanged,
   initialReportType = "Stock",
+  allowedViews = null,
 }: {
   activeView: string;
   focusId?: string;
   onNavigate?: (intent: { view: string; focusId?: string }) => void;
   onReviewsChanged?: () => void;
   initialReportType?: ReportType;
+  allowedViews?: string[] | null;
 }) {
   const [scopedMessage, setScopedMessage] = useState({ view: "", text: "" });
   const message = scopedMessage.view === activeView ? scopedMessage.text : "";
@@ -165,13 +179,17 @@ export function ManagementOperations({
       last_sign_in_at?: string | null;
     }[]
   >([]);
+  const [selectedAccessUserId, setSelectedAccessUserId] = useState("");
+  const [viewOverrides, setViewOverrides] = useState<ViewOverride[]>([]);
+  const [savingView, setSavingView] = useState("");
   const [businessReferences, setBusinessReferences] = useState<
     BusinessReference[]
   >([]);
   const [reportClients, setReportClients] = useState<
     { id: string; legal_name: string }[]
   >([]);
-  const [reportType, setReportType] = useState<ReportType>(initialReportType);
+  const visibleReportTypes = reportTypes.filter((type) => !allowedViews || allowedViews.includes(reportViews[type]));
+  const [reportType, setReportType] = useState<ReportType>(visibleReportTypes.includes(initialReportType) ? initialReportType : visibleReportTypes[0] ?? initialReportType);
   const [reportFrom, setReportFrom] = useState("");
   const [reportTo, setReportTo] = useState("");
   const [reportClientId, setReportClientId] = useState("");
@@ -201,6 +219,7 @@ export function ManagementOperations({
   const selectedReportRow = reportTable.rows.find(
     (item) => item.id === selectedReportRowId,
   );
+  const selectedAccessProfile = profiles.find((item) => item.id === selectedAccessUserId);
   const notice = message && (
     <div className="operation-message" role="status">
       <Check size={17} />
@@ -220,7 +239,12 @@ export function ManagementOperations({
       const profileById = new Map(
         data.profiles.map((profile) => [profile.id, profile.full_name]),
       );
+      if (activeView === "Administration" && !data.adminUsers.length) throw new Error("The administrator user list could not be loaded.");
       setProfiles(data.adminUsers.length ? data.adminUsers : data.profiles);
+      if (activeView === "Administration") {
+        setViewOverrides(await loadViewOverrides());
+        setSelectedAccessUserId((current) => current || data.adminUsers[0].id);
+      }
       setBusinessReferences(data.businessReferences);
       setReportClients(data.clients);
       setManagementClients(data.clients);
@@ -273,10 +297,10 @@ export function ManagementOperations({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void reloadManagement();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeView]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (activeView === "Reports" && reportTable.columns.length === 0)
-      void refreshReport("Stock");
+    if (activeView === "Reports" && reportTable.columns.length === 0 && visibleReportTypes.length)
+      void refreshReport(reportType);
   }, [activeView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function openArrearsCase(event: FormEvent<HTMLFormElement>) {
@@ -362,6 +386,20 @@ export function ManagementOperations({
           ? error.message
           : "User access could not be updated.",
       );
+    }
+  }
+
+  async function saveViewAccess(view: string, value: string) {
+    if (!selectedAccessProfile) return;
+    setSavingView(view);
+    try {
+      await setViewOverride(selectedAccessProfile.id, view, value === "default" ? null : value === "allow");
+      setViewOverrides(await loadViewOverrides());
+      setMessage(`${view} access updated for ${selectedAccessProfile.full_name}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Feature access could not be saved.");
+    } finally {
+      setSavingView("");
     }
   }
 
@@ -489,6 +527,7 @@ export function ManagementOperations({
   }
 
   async function refreshReport(nextType = reportType, reset = false) {
+    if (!visibleReportTypes.includes(nextType)) return;
     setReportLoading(true);
     try {
       const next = await loadReportTable(nextType, {
@@ -716,23 +755,7 @@ export function ManagementOperations({
             className="report-catalog"
             aria-label="All operational reports"
           >
-            {(
-              [
-                "Stock",
-                "Receipts",
-                "Processing",
-                "Dispatch",
-                "Quantity Issues",
-                "Billing",
-                "Storage Loss",
-                "Bags",
-                "Labour",
-                "Generator",
-                "Arrears",
-                "Documents",
-                "Audit",
-              ] as ReportType[]
-            ).map((type) => (
+            {visibleReportTypes.map((type) => (
               <button
                 className={reportType === type ? "active" : ""}
                 type="button"
@@ -783,23 +806,7 @@ export function ManagementOperations({
                   void refreshReport(nextType);
                 }}
               >
-                {(
-                  [
-                    "Stock",
-                    "Receipts",
-                    "Processing",
-                    "Dispatch",
-                    "Quantity Issues",
-                    "Billing",
-                    "Storage Loss",
-                    "Bags",
-                    "Labour",
-                    "Generator",
-                    "Arrears",
-                    "Documents",
-                    "Audit",
-                  ] as ReportType[]
-                ).map((type) => (
+                {visibleReportTypes.map((type) => (
                   <option key={type}>{type}</option>
                 ))}
               </select>
@@ -1408,6 +1415,38 @@ export function ManagementOperations({
                 </div>
               ))}
             </div>
+          </section>
+          <section className="record-panel admin-feature-panel" aria-label="Feature access">
+            <div>
+              <h3>Feature access</h3>
+              <p>Choose who can open and read each module. The role still controls creating, changing, posting, and approving records.</p>
+              <label>
+                Staff user
+                <select value={selectedAccessUserId} onChange={(event) => setSelectedAccessUserId(event.target.value)}>
+                  {profiles.map((item) => <option key={item.id} value={item.id}>{item.full_name}</option>)}
+                </select>
+              </label>
+            </div>
+            {selectedAccessProfile && <div className="admin-feature-list">
+              {configurableViews.map((view) => {
+                const override = viewOverrides.find((item) => item.profile_id === selectedAccessProfile.id && item.view_key === view);
+                const roleDefault = canAccessView(selectedAccessProfile.role, view);
+                return <label key={view}>
+                  <span><strong>{view}</strong><small>Role default: {roleDefault ? "Allowed" : "Denied"}</small></span>
+                  <select
+                    aria-label={`${view} access for ${selectedAccessProfile.full_name}`}
+                    value={override ? override.allowed ? "allow" : "deny" : "default"}
+                    disabled={Boolean(savingView)}
+                    onChange={(event) => void saveViewAccess(view, event.target.value)}
+                  >
+                    <option value="default">Use role default</option>
+                    <option value="allow">Allow reading</option>
+                    <option value="deny">Deny reading</option>
+                  </select>
+                </label>;
+              })}
+            </div>}
+            {savingView && <p role="status">Saving {savingView} access...</p>}
           </section>
         </>
       )}

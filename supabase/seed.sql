@@ -20,9 +20,9 @@ values
    '{"sub":"10000000-0000-0000-0000-000000000002","email":"manager@hayked.local","email_verified":true}', 'email', now(), now())
 on conflict (provider_id, provider) do nothing;
 
-update public.profiles set role = 'system_admin', full_name = 'Meron Tadesse'
+update public.profiles set role = 'system_admin', full_name = 'Meron Tadesse', active = true
 where id = '10000000-0000-0000-0000-000000000001';
-update public.profiles set role = 'warehouse_manager', full_name = 'Daniel Bekele'
+update public.profiles set role = 'warehouse_manager', full_name = 'Daniel Bekele', active = true
 where id = '10000000-0000-0000-0000-000000000002';
 
 insert into public.clients (id, organization_id, code, legal_name, tin, phone, email, created_by)
@@ -158,11 +158,11 @@ values
   ('viewer@hayked.local', '10000000-0000-0000-0000-000000000007', '{"sub":"10000000-0000-0000-0000-000000000007","email":"viewer@hayked.local","email_verified":true}', 'email', now(), now())
 on conflict (provider_id, provider) do nothing;
 
-update public.profiles set role = 'warehouse_officer', full_name = 'Hana Tesfaye' where id = '10000000-0000-0000-0000-000000000003';
-update public.profiles set role = 'processing_supervisor', full_name = 'Samuel Girma' where id = '10000000-0000-0000-0000-000000000004';
-update public.profiles set role = 'finance_officer', full_name = 'Selam Worku' where id = '10000000-0000-0000-0000-000000000005';
-update public.profiles set role = 'auditor', full_name = 'Rahel Alemu' where id = '10000000-0000-0000-0000-000000000006';
-update public.profiles set role = 'viewer', full_name = 'Abebe Tadesse' where id = '10000000-0000-0000-0000-000000000007';
+update public.profiles set role = 'warehouse_officer', full_name = 'Hana Tesfaye', active = true where id = '10000000-0000-0000-0000-000000000003';
+update public.profiles set role = 'processing_supervisor', full_name = 'Samuel Girma', active = true where id = '10000000-0000-0000-0000-000000000004';
+update public.profiles set role = 'finance_officer', full_name = 'Selam Worku', active = true where id = '10000000-0000-0000-0000-000000000005';
+update public.profiles set role = 'auditor', full_name = 'Rahel Alemu', active = true where id = '10000000-0000-0000-0000-000000000006';
+update public.profiles set role = 'viewer', full_name = 'Abebe Tadesse', active = true where id = '10000000-0000-0000-0000-000000000007';
 
 insert into public.warehouses (id, organization_id, code, name, location, is_primary)
 select '11000000-0000-0000-0000-000000000002', id, 'MOD', 'ECS Warehouse - Modjo', 'Modjo, Oromia', false

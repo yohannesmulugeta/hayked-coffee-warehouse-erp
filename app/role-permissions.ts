@@ -10,6 +10,13 @@ export const appRoles = [
 
 export type AppRole = (typeof appRoles)[number];
 
+export const configurableViews = [
+  "Clients", "Warehouse Receipts", "Coffee Lots", "Processing", "Laboratory",
+  "Dispatch", "Labour", "Finance", "Reports", "Approvals", "Agreements",
+  "Representatives", "Storage Loss", "Ownership Transfers", "Bag Control",
+  "Generator Requests", "Documents", "Audit History", "Arrears Cases",
+] as const;
+
 const viewAccess: Record<AppRole, ReadonlySet<string>> = {
   system_admin: new Set(["*"]),
   warehouse_manager: new Set([

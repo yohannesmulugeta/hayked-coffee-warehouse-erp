@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import * as permissions from "../app/role-permissions.ts";
@@ -47,4 +48,20 @@ test("laboratory is visible to staff without granting edit rights through naviga
     assert.equal(canAccessView(role, "Laboratory"), true, role);
   }
   assert.equal(canAccessView("viewer", "Processing"), false);
+});
+
+test("database role defaults match navigation and every assignable view is catalogued", () => {
+  const migration = readFileSync(new URL("../supabase/migrations/20261022073724_user_feature_access.sql", import.meta.url), "utf8");
+  for (const view of permissions.configurableViews) {
+    assert.ok(migration.includes(`('${view}', true)`), `${view} is absent from the database catalog`);
+  }
+  for (const role of permissions.appRoles) {
+    if (role === "system_admin") continue;
+    const match = migration.match(new RegExp(`select '${role}', unnest\\(array\\[([\\s\\S]*?)\\]\\);`));
+    assert.ok(match, `${role} defaults are missing`);
+    const databaseViews = [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
+    for (const view of ["Dashboard", ...permissions.configurableViews, "Administration"]) {
+      assert.equal(databaseViews.includes(view), canAccessView(role, view), `${role}: ${view}`);
+    }
+  }
 });

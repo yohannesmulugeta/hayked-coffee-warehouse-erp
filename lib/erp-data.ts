@@ -1163,6 +1163,21 @@ export async function updateProfile(id: string, role: string, active: boolean) {
   if (error) throw new Error(error.message);
 }
 
+export type ViewOverride = { profile_id: string; view_key: string; allowed: boolean };
+
+export async function loadViewOverrides(): Promise<ViewOverride[]> {
+  const { data, error } = await createSupabaseClient().rpc("list_admin_view_overrides");
+  if (error) throw new Error(error.message);
+  return data as ViewOverride[];
+}
+
+export async function setViewOverride(profileId: string, viewKey: string, allowed: boolean | null) {
+  const { error } = await createSupabaseClient().rpc("set_admin_view_override", {
+    p_profile_id: profileId, p_view_key: viewKey, p_allowed: allowed,
+  });
+  if (error) throw new Error(error.message);
+}
+
 export type WarehouseControlData = {
   currentUserId: string;
   clients: ClientRow[];
