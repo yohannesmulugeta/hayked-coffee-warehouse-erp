@@ -75,7 +75,7 @@ export async function renderLaboratoryPdf(snapshot: Snapshot, version: number): 
   if (snapshot.lot_number) field("Warehouse lot", value(snapshot, "lot_number"));
   field("Received on", value(snapshot, "received_on"));
   field("Origin", value(snapshot, "origin"));
-  field("Process", value(snapshot, "process"));
+  field("Coffee category", value(snapshot, "process"));
   section("GREEN COFFEE ASSESSMENT");
   field("Moisture", snapshot.moisture_percent == null ? "Not recorded" : `${snapshot.moisture_percent}%`);
   field("Screen 14 and above", snapshot.screen_14_percent == null ? "Not recorded" : `${snapshot.screen_14_percent}%`);

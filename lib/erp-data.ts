@@ -1,4 +1,5 @@
 import { createSupabaseClient } from "./supabase/client";
+import { laboratoryDatabaseEnabled } from "./laboratory-config";
 import { activeOn, clientReadiness } from "@/app/client-onboarding";
 import type { CoffeeLot, StockMovement, WarehouseReceipt } from "@/app/grn-workflow";
 import type { ProcessingOutputLine, ProcessingRequest, ProcessingRequestLine } from "@/app/processing-workflow";
@@ -66,7 +67,7 @@ export type CoreData = {
   tariffs: { code: string; name: string; active: boolean }[];
 };
 
-export type GlobalSearchResult = { id: string; kind: "Client" | "Agreement" | "GRN" | "Lot" | "Processing" | "Dispatch" | "Invoice" | "Payment" | "Document"; title: string; context: string; view: string };
+export type GlobalSearchResult = { id: string; kind: "Client" | "Agreement" | "GRN" | "Lot" | "Processing" | "Dispatch" | "Invoice" | "Payment" | "Document" | "Physical check" | "Special job" | "Lab sample" | "Bag charge"; title: string; context: string; view: string };
 
 export type DashboardData = {
   metrics: { label: string; value: number; unit: string; detail: string }[];
@@ -80,7 +81,7 @@ export type DashboardData = {
 
 export async function loadDashboardData(): Promise<DashboardData> {
   const db = createSupabaseClient();
-  const [lotResult, orderResult, movementResult, approvalResult, agreementResult, invoiceResult, auditResult, profileResult, clientResult, receiptResult, dispatchResult, paymentResult, documentResult] = await Promise.all([
+  const [lotResult, orderResult, movementResult, approvalResult, agreementResult, invoiceResult, auditResult, profileResult, clientResult, receiptResult, dispatchResult, paymentResult, documentResult, checkResult, jobResult, sampleResult, bagChargeResult] = await Promise.all([
     db.from("coffee_lots").select("id,lot_number,client_id,lot_category,ownership_type,bag_count,quantity_kg,status"),
     db.from("processing_orders").select("id,order_number,client_id,status,input_kg"),
     db.from("stock_movements").select("movement_type,quantity_kg,occurred_at").order("occurred_at"),
@@ -94,6 +95,10 @@ export async function loadDashboardData(): Promise<DashboardData> {
     db.from("dispatch_orders").select("id,dispatch_number,client_id,status"),
     db.from("payments").select("id,payment_number,client_id,bank_reference,direction"),
     db.from("documents").select("id,document_number,file_name,status"),
+    db.from("quantity_checks").select("id,stage,reference_id,client_id,evidence_reference,status"),
+    db.from("coffee_transform_jobs").select("id,job_type,client_id,evidence_reference,status"),
+    laboratoryDatabaseEnabled ? db.from("lab_samples").select("id,sample_code,client_id,status") : Promise.resolve({ data: [] as { id: string; sample_code: string; client_id: string; status: string }[], error: null }),
+    db.from("empty_bag_charge_runs").select("id,run_number,client_id,status"),
   ]);
   const lots = result(lotResult.data, lotResult.error) as { id: string; lot_number: string; client_id: string; lot_category: string | null; ownership_type: string; bag_count: number; quantity_kg: number; status: string }[];
   const orders = result(orderResult.data, orderResult.error) as { id: string; order_number: string; client_id: string; status: string; input_kg: number }[];
@@ -108,6 +113,15 @@ export async function loadDashboardData(): Promise<DashboardData> {
   const dispatches = result(dispatchResult.data, dispatchResult.error) as { id: string; dispatch_number: string; client_id: string; status: string }[];
   const payments = result(paymentResult.data, paymentResult.error) as { id: string; payment_number: string; client_id: string; bank_reference: string; direction: string }[];
   const documents = result(documentResult.data, documentResult.error) as { id: string; document_number: string; file_name: string; status: string }[];
+  // New workflow tables may not exist in an older deployment. Other errors must remain visible.
+  const optionalRows = <T,>(data: T[] | null, error: DbError): T[] => {
+    if (error && !["42P01", "PGRST205"].includes(error.code ?? "")) throw new Error(friendlyDatabaseError(error, "A workflow queue could not be loaded."));
+    return data ?? [];
+  };
+  const checks = optionalRows(checkResult.data as { id: string; stage: string; reference_id: string; client_id: string; evidence_reference: string; status: string }[] | null, checkResult.error);
+  const jobs = optionalRows(jobResult.data as { id: string; job_type: string; client_id: string; evidence_reference: string; status: string }[] | null, jobResult.error);
+  const samples = optionalRows(sampleResult.data as { id: string; sample_code: string; client_id: string; status: string }[] | null, sampleResult.error);
+  const bagCharges = optionalRows(bagChargeResult.data as { id: string; run_number: string; client_id: string; status: string }[] | null, bagChargeResult.error);
   const activeLots = lots.filter((item) => Number(item.quantity_kg) > 0 && !["CLOSED", "DISPATCHED", "REVERSED"].includes(item.status));
   const metric = (filter: (lot: typeof activeLots[number]) => boolean) => {
     const rows = activeLots.filter(filter);
@@ -132,7 +146,9 @@ export async function loadDashboardData(): Promise<DashboardData> {
   });
   const today = new Date();
   const inThirtyDays = new Date(today); inThirtyDays.setDate(today.getDate() + 30);
-  const pendingApprovals = approvals.filter((item) => item.status === "PENDING").length;
+  const pendingApprovals = approvals.filter((item) => item.status === "PENDING").length
+    + checks.filter((item) => item.status === "PENDING").length
+    + jobs.filter((item) => item.status === "PENDING").length;
   const profileById = new Map(profiles.map((item) => [item.id, item.full_name]));
   const clientById = new Map(clients.map((item) => [item.id, item.legal_name]));
   return {
@@ -151,6 +167,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
     movements: movementDays,
     attention: [
       { count: pendingApprovals, label: "Pending approvals", note: "Independent review queue", tone: "red" },
+      { count: bagCharges.filter((item) => item.status === "PENDING_REVIEW").length, label: "Bag charges awaiting review", note: "Open Billing → Storage Review", tone: "red" },
       { count: agreements.filter((item) => item.status === "ACTIVE" && item.effective_to && new Date(item.effective_to) >= today && new Date(item.effective_to) <= inThirtyDays).length, label: "Agreements expiring", note: "Within the next 30 days", tone: "amber" },
       { count: approvals.filter((item) => item.status === "PENDING" && item.request_type === "PROCESSING_EXCEPTION").length, label: "Processing exceptions", note: "Evidence and approval required", tone: "red" },
       { count: invoices.filter((item) => ["ISSUED", "PARTIALLY_PAID"].includes(item.status)).length, label: "Open invoices", note: "Release requires payment or credit", tone: "amber" },
@@ -172,6 +189,10 @@ export async function loadDashboardData(): Promise<DashboardData> {
       ...invoices.map((item) => ({ id: item.id, kind: "Invoice" as const, title: item.invoice_number, context: `${clientById.get(item.client_id) ?? "Unknown client"} - ${item.status.replaceAll("_", " ")}`, view: "Finance" })),
       ...payments.map((item) => ({ id: item.id, kind: "Payment" as const, title: item.payment_number, context: `${clientById.get(item.client_id) ?? "Unknown client"} - ${item.bank_reference}`, view: "Finance" })),
       ...documents.map((item) => ({ id: item.id, kind: "Document" as const, title: item.document_number, context: `${item.file_name} - ${item.status.replaceAll("_", " ")}`, view: "Documents" })),
+      ...checks.map((item) => ({ id: item.id, kind: "Physical check" as const, title: `${item.stage.replaceAll("_", " ")} · ${item.evidence_reference}`, context: `${clientById.get(item.client_id) ?? "Unknown client"} - ${item.status.replaceAll("_", " ")}`, view: "Approvals" })),
+      ...jobs.map((item) => ({ id: item.id, kind: "Special job" as const, title: `${item.job_type === "BLEND" ? "Blending" : "Rebagging"} · ${item.evidence_reference}`, context: `${clientById.get(item.client_id) ?? "Unknown client"} - ${item.status.replaceAll("_", " ")}`, view: "Processing" })),
+      ...samples.map((item) => ({ id: item.id, kind: "Lab sample" as const, title: item.sample_code, context: `${clientById.get(item.client_id) ?? "Unknown client"} - ${item.status.replaceAll("_", " ")}`, view: "Laboratory" })),
+      ...bagCharges.map((item) => ({ id: item.id, kind: "Bag charge" as const, title: item.run_number, context: `${clientById.get(item.client_id) ?? "Unknown client"} - ${item.status.replaceAll("_", " ")}`, view: "Finance" })),
     ],
   };
 }
@@ -805,7 +826,7 @@ export async function loadManagementData() {
     db.from("clients").select("id,code,legal_name"),
     db.from("arrears_cases").select("id,case_number,client_id,invoice_id,stage,outstanding_etb,opened_on,oldest_due_on,next_action_on,assigned_to,notes,closed_at,created_at,updated_at").order("created_at", { ascending: false }),
     db.from("arrears_case_events").select("id,case_id,from_stage,to_stage,note,action_by,created_at").order("created_at", { ascending: false }),
-    db.from("lab_samples").select("id,sample_code"),
+    laboratoryDatabaseEnabled ? db.from("lab_samples").select("id,sample_code") : Promise.resolve({ data: [] as { id: string; sample_code: string }[], error: null }),
     db.rpc("list_admin_users"),
   ]);
   const references = new Map<string, string>();

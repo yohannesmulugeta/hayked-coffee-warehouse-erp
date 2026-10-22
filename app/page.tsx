@@ -28,7 +28,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { lazy, Suspense, type FormEvent, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createSupabaseClient, supabaseConfigured } from "@/lib/supabase/client";
 import type { DashboardData, ReportType } from "@/lib/erp-data";
 import { greetingForHour, warehouseHour } from "@/lib/ui-format";
@@ -45,8 +45,44 @@ const FinanceOperations = lazy(() => import("./finance-operations").then((module
 const ManagementOperations = lazy(() => import("./management-operations").then((module) => ({ default: module.ManagementOperations })));
 
 type NavItem = { view: string; label: string; icon: LucideIcon; badge?: number };
-type NavigationIntent = { view: string; stockType?: StockTypeFilter; stockStatus?: StockStatusFilter; processingState?: ProcessingStateFilter; reportType?: ReportType; focusId?: string };
+type NavigationIntent = { view: string; stockType?: StockTypeFilter; stockStatus?: StockStatusFilter; processingState?: ProcessingStateFilter; reportType?: ReportType; financeTab?: "Storage Review"; focusId?: string };
 type DatabaseStatus = "demo" | "loading" | "ready" | "error";
+const stockTypes: StockTypeFilter[] = ["All", "Arrival", "Processed", "Reject", "Hayked Byproduct"];
+const stockStatuses: StockStatusFilter[] = ["All", "Available", "Waiting Processing", "In Processing", "Awaiting Dispatch", "Reserved", "Closed", "Reversed"];
+const processingStates: ProcessingStateFilter[] = ["All", "Waiting Approval", "Ready to Start", "In Progress", "Completed", "Rejected"];
+const reportTypes: ReportType[] = ["Stock", "Receipts", "Processing", "Dispatch", "Quantity Issues", "Billing", "Storage Loss", "Bags", "Labour", "Generator", "Arrears", "Documents", "Audit"];
+
+function intentFromUrl(role: string): NavigationIntent {
+  const params = new URLSearchParams(window.location.search);
+  const view = params.get("view") ?? "Dashboard";
+  if (!isImplementedView(view) || !canAccessView(role, view)) return { view: "Dashboard" };
+  const stockType = params.get("stockType") as StockTypeFilter;
+  const stockStatus = params.get("stockStatus") as StockStatusFilter;
+  const processingState = params.get("processingState") as ProcessingStateFilter;
+  const reportType = params.get("reportType") as ReportType;
+  return {
+    view,
+    stockType: stockTypes.includes(stockType) ? stockType : undefined,
+    stockStatus: stockStatuses.includes(stockStatus) ? stockStatus : undefined,
+    processingState: processingStates.includes(processingState) ? processingState : undefined,
+    reportType: reportTypes.includes(reportType) ? reportType : undefined,
+    financeTab: params.get("financeTab") === "Storage Review" ? "Storage Review" : undefined,
+    focusId: /^[0-9a-f-]{36}$/i.test(params.get("focusId") ?? "") ? params.get("focusId")! : undefined,
+  };
+}
+
+function urlForIntent(intent: NavigationIntent) {
+  const url = new URL(window.location.href);
+  for (const key of ["view", "stockType", "stockStatus", "processingState", "reportType", "financeTab", "focusId"]) url.searchParams.delete(key);
+  if (intent.view !== "Dashboard") url.searchParams.set("view", intent.view);
+  if (intent.stockType && intent.stockType !== "All") url.searchParams.set("stockType", intent.stockType);
+  if (intent.stockStatus && intent.stockStatus !== "All") url.searchParams.set("stockStatus", intent.stockStatus);
+  if (intent.processingState && intent.processingState !== "All") url.searchParams.set("processingState", intent.processingState);
+  if (intent.reportType && intent.reportType !== "Stock") url.searchParams.set("reportType", intent.reportType);
+  if (intent.financeTab) url.searchParams.set("financeTab", intent.financeTab);
+  if (intent.focusId) url.searchParams.set("focusId", intent.focusId);
+  return url;
+}
 
 const operations: NavItem[] = [
   { view: "Clients", label: "Clients", icon: UsersRound },
@@ -159,7 +195,7 @@ function Login({ onSignIn }: { onSignIn: (email: string, password: string) => Pr
           <label htmlFor="password">Password</label>
           <div className="input-shell"><span>•</span><input id="password" name="password" type={showPassword ? "text" : "password"} defaultValue={supabaseConfigured ? "" : "HaykedDemo2026"} autoComplete="current-password" required /><button type="button" onClick={() => setShowPassword((value) => !value)}>{showPassword ? "Hide" : "Show"}</button></div>
 
-          <div className="login-options"><label><input type="checkbox" defaultChecked /> Keep me signed in</label><button type="button">Forgot password?</button></div>
+          <p className="login-help">For access or a password reset, contact your Hayked system administrator.</p>
           {error && <div className="login-error" role="alert">{error}</div>}
           <button className="sign-in" type="submit" disabled={busy}>{busy ? "Signing in..." : "Sign in to workspace"} <ArrowRight size={17} /></button>
           <div className="prototype-note"><ShieldCheck size={17} /><span><strong>{supabaseConfigured ? "Supabase authentication" : "Prototype access"}</strong>{supabaseConfigured ? "Access is checked against your assigned warehouse role." : "Demo credentials are pre-filled. No real company data is used."}</span></div>
@@ -211,20 +247,21 @@ type CurrentProfile = { id: string; full_name: string; role: string };
 
 function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: CurrentProfile }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeView, setActiveView] = useState(() => {
-    const requested = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("view");
-    return requested === "Laboratory" && canAccessView(profile.role, requested) ? requested : "Dashboard";
-  });
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const [activeView, setActiveView] = useState("Dashboard");
   const [query, setQuery] = useState("");
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus>(supabaseConfigured ? "loading" : "demo");
   const [databaseError, setDatabaseError] = useState("");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [compactNavigation, setCompactNavigation] = useState(false);
   const [stockIntent, setStockIntent] = useState<{ type: StockTypeFilter; status: StockStatusFilter; focusId?: string }>({ type: "All", status: "All" });
   const [processingState, setProcessingState] = useState<ProcessingStateFilter>("All");
   const [reportType, setReportType] = useState<ReportType>("Stock");
+  const [financeTab, setFinanceTab] = useState<"Client Accounts" | "Storage Review">("Client Accounts");
+  const currentUrl = useRef("");
   async function reloadDashboard() {
     if (!supabaseConfigured) {
       setDatabaseStatus("demo");
@@ -255,6 +292,62 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
+  useEffect(() => {
+    if (!compactNavigation || !sidebarOpen) return;
+    const drawer = document.querySelector<HTMLElement>(".sidebar");
+    drawer?.querySelector<HTMLButtonElement>(".sidebar-head button")?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSidebarOpen(false);
+        requestAnimationFrame(() => menuButtonRef.current?.focus());
+      } else if (event.key === "Tab") {
+        const focusable = Array.from(drawer?.querySelectorAll<HTMLButtonElement>("button:not([disabled])") ?? []);
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [compactNavigation, sidebarOpen]);
+  useEffect(() => {
+    if (!profileOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setProfileOpen(false); };
+    const closeOutside = (event: PointerEvent) => { if (!(event.target as Element).closest(".profile-wrap")) setProfileOpen(false); };
+    document.addEventListener("keydown", closeOnEscape);
+    document.addEventListener("pointerdown", closeOutside);
+    return () => { document.removeEventListener("keydown", closeOnEscape); document.removeEventListener("pointerdown", closeOutside); };
+  }, [profileOpen]);
+  useEffect(() => {
+    const restore = (event?: PopStateEvent) => {
+      if (event && !window.dispatchEvent(new Event("hayked:navigate", { cancelable: true }))) {
+        window.history.pushState(null, "", currentUrl.current || window.location.pathname);
+        return;
+      }
+      const intent = intentFromUrl(profile.role);
+      const requestedView = new URLSearchParams(window.location.search).get("view");
+      if (requestedView && intent.view === "Dashboard" && requestedView !== "Dashboard") window.history.replaceState(null, "", urlForIntent({ view: "Dashboard" }));
+      currentUrl.current = window.location.href;
+      setActiveView(intent.view);
+      setStockIntent({ type: intent.stockType ?? "All", status: intent.stockStatus ?? "All", focusId: intent.focusId });
+      setProcessingState(intent.processingState ?? "All");
+      setReportType(intent.reportType ?? "Stock");
+      setFinanceTab(intent.financeTab ?? "Client Accounts");
+      setNotificationOpen(false);
+      setProfileOpen(false);
+    };
+    restore();
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, [profile.role]);
   const filteredActivities = useMemo(() => (dashboardData?.activities ?? (supabaseConfigured ? [] : activities)).filter((row) => row.join(" ").toLowerCase().includes(query.toLowerCase())), [dashboardData?.activities, query]);
   const visibleMetrics = dashboardData?.metrics.map((item, index) => ({ ...item, value: item.value.toLocaleString(), tone: metrics[index].tone, icon: metrics[index].icon })) ?? (supabaseConfigured ? [] : metrics);
   const visibleMovements = dashboardData?.movements ?? (supabaseConfigured ? [] : movements);
@@ -284,12 +377,23 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
 
   function navigate(intent: NavigationIntent) {
     if (!canAccessView(profile.role, intent.view)) return;
-    if (intent.stockType || intent.stockStatus || intent.focusId) setStockIntent({ type: intent.stockType ?? "All", status: intent.stockStatus ?? "All", focusId: intent.focusId });
-    if (intent.processingState) setProcessingState(intent.processingState);
-    if (intent.reportType) setReportType(intent.reportType);
+    if (!window.dispatchEvent(new Event("hayked:navigate", { cancelable: true }))) return;
+    const url = urlForIntent(intent);
+    window.history.pushState(null, "", url);
+    currentUrl.current = url.href;
+    setStockIntent({ type: intent.stockType ?? "All", status: intent.stockStatus ?? "All", focusId: intent.focusId });
+    setProcessingState(intent.processingState ?? "All");
+    setReportType(intent.reportType ?? "Stock");
+    setFinanceTab(intent.financeTab ?? "Client Accounts");
     setActiveView(intent.view);
     setNotificationOpen(false);
+    setProfileOpen(false);
     setQuery("");
+  }
+
+  function closeNavigation() {
+    setSidebarOpen(false);
+    if (compactNavigation) requestAnimationFrame(() => menuButtonRef.current?.focus());
   }
 
   function metricIntent(label: string): NavigationIntent {
@@ -309,21 +413,21 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
   return (
     <main className={`app-shell ${viewClass} ${masterDataClass}`}>
       <a className="skip-link" href="#workspace-content">Skip to workspace</a>
-      <Sidebar open={sidebarOpen} compact={compactNavigation} activeView={activeView} pendingApprovals={dashboardData?.pendingApprovals ?? 0} databaseStatus={databaseStatus} role={profile.role} onNavigate={navigate} onClose={() => setSidebarOpen(false)} />
+      <Sidebar open={sidebarOpen} compact={compactNavigation} activeView={activeView} pendingApprovals={dashboardData?.pendingApprovals ?? 0} databaseStatus={databaseStatus} role={profile.role} onNavigate={navigate} onClose={closeNavigation} />
       <section className="workspace" id="workspace-content" tabIndex={-1} aria-hidden={compactNavigation && sidebarOpen} inert={compactNavigation && sidebarOpen ? true : undefined}>
         <header className="topbar">
-          <div className="crumb"><button type="button" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}><Menu size={20} /><span>Menu</span></button><span>Workspace</span><ChevronRight size={13} /><strong>{viewLabels.get(activeView) ?? activeView}</strong></div>
+          <div className="crumb"><button ref={menuButtonRef} type="button" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}><Menu size={20} /><span>Menu</span></button><span>Workspace</span><ChevronRight size={13} /><strong>{viewLabels.get(activeView) ?? activeView}</strong></div>
           <div className="top-actions">
             <div className="global-search-wrap"><label className="global-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search any client, coffee, payment or document" aria-label="Search warehouse records" /></label>{query.trim().length >= 2 && <div className="global-search-results" role="listbox" aria-label="Search results">{searchResults.length ? searchResults.map((item) => <button key={`${item.kind}-${item.id}`} type="button" onClick={() => navigate({ view: item.view, focusId: item.id })}><span>{item.kind}</span><strong>{item.title}</strong><small>{item.context}</small></button>) : <p>No matching warehouse records.</p>}</div>}</div>
             {canAccessView(profile.role, "Approvals") && <button className="icon-button" type="button" aria-label="Approvals" onClick={() => navigate({ view: "Approvals" })}><ClipboardCheck size={18} />{Boolean(dashboardData?.pendingApprovals) && <b>{dashboardData?.pendingApprovals}</b>}</button>}
             <div className="notification-wrap"><button className="icon-button" type="button" aria-label="Notifications" aria-expanded={notificationOpen} onClick={() => setNotificationOpen((value) => !value)}><Bell size={18} />{notificationCount > 0 && <b>{notificationCount}</b>}</button>{notificationOpen && <div className="notification-popover" role="dialog" aria-label="Items needing attention"><header><div><strong>Needs attention</strong><small>{notificationCount ? `${notificationCount} actionable item${notificationCount === 1 ? "" : "s"}` : "Warehouse queue is clear"}</small></div><button type="button" aria-label="Close notifications" onClick={() => setNotificationOpen(false)}><X size={16} /></button></header>{actionableAttention.length ? actionableAttention.map((item) => <button type="button" key={item.label} onClick={() => navigate(notificationTarget(item.label))}><b className={item.tone}>{item.count}</b><span><strong>{item.label}</strong><small>{item.note}</small></span><ChevronRight size={15} /></button>) : <p>No items need your attention.</p>}</div>}</div>
-            <button className="profile" type="button" onClick={onSignOut}><span>{initials}</span><span><strong>{profile.full_name}</strong><small>{profile.role.replaceAll("_", " ")}</small></span></button>
+            <div className="profile-wrap"><button className="profile" type="button" aria-expanded={profileOpen} aria-controls="profile-menu" onClick={() => setProfileOpen((value) => !value)}><span>{initials}</span><span><strong>{profile.full_name}</strong><small>{profile.role.replaceAll("_", " ")}</small></span></button>{profileOpen && <div className="profile-menu" id="profile-menu"><p>{profile.full_name}<small>{profile.role.replaceAll("_", " ")}</small></p><button type="button" onClick={() => { if (window.dispatchEvent(new Event("hayked:navigate", { cancelable: true }))) onSignOut(); }}>Sign out</button></div>}</div>
           </div>
         </header>
 
         {activeView === "Dashboard" ? <div className="dashboard">
           <section className="welcome-row">
-            <div><span className="demo-label">{databaseStatus === "ready" ? "DATABASE CONNECTED" : databaseStatus === "loading" ? "CHECKING DATABASE" : databaseStatus === "error" ? "DATABASE UNAVAILABLE" : "LOCAL SAMPLE WORKSPACE"}</span><h1>{greeting}, {firstName}.</h1><p>{lastUpdated && databaseStatus === "ready" ? `Warehouse position updated ${lastUpdated.toLocaleTimeString()}.` : "Here is the warehouse position and today&apos;s operational attention list."}</p></div>
+            <div><span className="demo-label">{databaseStatus === "ready" ? "DATABASE CONNECTED" : databaseStatus === "loading" ? "CHECKING DATABASE" : databaseStatus === "error" ? "DATABASE UNAVAILABLE" : "LOCAL SAMPLE WORKSPACE"}</span><h1>{greeting}, {firstName}.</h1><p>{lastUpdated && databaseStatus === "ready" ? `Warehouse position updated ${lastUpdated.toLocaleTimeString()}.` : "Here is the warehouse position and today's operational attention list."}</p></div>
             <div className="page-actions"><button className="secondary-button" type="button" onClick={() => window.print()}><Printer size={17} />Print overview</button>{canAccessView(profile.role, "Warehouse Receipts") && <button className="primary-button" type="button" onClick={() => navigate({ view: "Warehouse Receipts" })}><Plus size={17} />Receive coffee</button>}</div>
           </section>
 
@@ -347,7 +451,7 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
 
           {!dashboardBlocked && <section className="dashboard-grid">
             <article className="panel movements-panel">
-              <header><div><h2>Seven-day warehouse movements</h2><p>Receipts and dispatches in kilograms</p></div><select aria-label="Movement period"><option>This week</option><option>Last week</option></select></header>
+              <header><div><h2>Recent warehouse movements</h2><p>Last seven recorded days · receipts and dispatches in kilograms</p></div></header>
               <div className="legend"><span><i className="received" />Received {receivedTotal.toLocaleString()} kg</span><span><i className="dispatched" />Dispatched {dispatchedTotal.toLocaleString()} kg</span></div>
               <div className="bar-chart" aria-label="Warehouse movements chart">
                 {visibleMovements.map((item) => <div className="bar-day" key={item.day}><div className="bars"><i className="received" style={{ height: `${item.received / movementMax * 100}%` }} /><i className="dispatched" style={{ height: `${item.dispatched / movementMax * 100}%` }} /></div><span>{item.day}</span></div>)}
@@ -366,7 +470,7 @@ function Dashboard({ onSignOut, profile }: { onSignOut: () => void; profile: Cur
               {filteredActivities.length ? filteredActivities.map((row, rowIndex) => <div role="row" key={`${row[0]}-${rowIndex}`}>{row.map((cell, index) => <span role="cell" key={`${cell}-${index}`} className={index === 0 ? "reference" : ""}>{cell}</span>)}</div>) : <p className="empty-result">No activity matches &quot;{query}&quot;.</p>}
             </div>
           </section>}
-        </div> : <Suspense fallback={<ModuleLoading label={viewLabels.get(activeView) ?? activeView} />}>{activeView === "Processing" ? <ProcessingOperations initialState={processingState} role={profile.role} userId={profile.id} /> : activeView === "Laboratory" ? <LaboratoryOperations role={profile.role} userId={profile.id} onNavigate={navigate} /> : warehouseControlViews.includes(activeView) ? <WarehouseControls activeView={activeView} onNavigate={navigate} /> : dispatchViews.includes(activeView) ? <DispatchOperations activeView={activeView} onNavigate={navigate} /> : financeViews.includes(activeView) ? <FinanceOperations /> : managementViews.includes(activeView) ? <ManagementOperations activeView={activeView} onNavigate={navigate} initialReportType={reportType} /> : <CoreOperations activeView={activeView} userId={profile.id} stockIntent={stockIntent} onNavigate={navigate} />}</Suspense>}
+        </div> : <Suspense fallback={<ModuleLoading label={viewLabels.get(activeView) ?? activeView} />}>{activeView === "Processing" ? <ProcessingOperations initialState={processingState} focusId={stockIntent.focusId} role={profile.role} userId={profile.id} /> : activeView === "Laboratory" ? <LaboratoryOperations role={profile.role} userId={profile.id} focusId={stockIntent.focusId} onNavigate={navigate} /> : warehouseControlViews.includes(activeView) ? <WarehouseControls activeView={activeView} onNavigate={navigate} /> : dispatchViews.includes(activeView) ? <DispatchOperations activeView={activeView} focusId={stockIntent.focusId} onNavigate={navigate} /> : financeViews.includes(activeView) ? <FinanceOperations focusId={stockIntent.focusId} initialTab={financeTab} /> : managementViews.includes(activeView) ? <ManagementOperations activeView={activeView} focusId={stockIntent.focusId} onNavigate={navigate} onReviewsChanged={() => void reloadDashboard()} initialReportType={reportType} /> : <CoreOperations activeView={activeView} userId={profile.id} stockIntent={stockIntent} onNavigate={navigate} />}</Suspense>}
       </section>
     </main>
   );
@@ -377,7 +481,7 @@ export default function Home() {
   const [checkingSession, setCheckingSession] = useState(supabaseConfigured);
   const [profile, setProfile] = useState<CurrentProfile>({ id: "", full_name: supabaseConfigured ? "Signed-in user" : "Local user", role: "viewer" });
 
-  // The query link opens the database-free public preview after hydration.
+  // Preserve the database-free laboratory preview link in demo environments.
   useEffect(() => {
     if (!supabaseConfigured && new URLSearchParams(window.location.search).get("view") === "Laboratory") {
       // eslint-disable-next-line react-hooks/set-state-in-effect

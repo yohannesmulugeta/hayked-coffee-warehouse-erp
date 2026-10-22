@@ -19,7 +19,7 @@ import {
   ThumbsUp,
   X,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   evaluateOutputCompletion,
   validateProcessingRequest,
@@ -845,10 +845,12 @@ function ProcessingRequestDetail({
 
 export function ProcessingOperations({
   initialState = "All",
+  focusId,
   role = "viewer",
   userId = "",
 }: {
   initialState?: ProcessingStateFilter;
+  focusId?: string;
   role?: string;
   userId?: string;
 }) {
@@ -866,6 +868,7 @@ export function ProcessingOperations({
   const [editingInputKey, setEditingInputKey] = useState<number | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [detailOrderId, setDetailOrderId] = useState("");
+  const appliedFocusId = useRef("");
   const [requestDetailId, setRequestDetailId] = useState("");
   const [outputLines, setOutputLines] = useState<ProcessingOutputLine[]>([]);
   const [exceptionApproved, setExceptionApproved] = useState(false);
@@ -1010,6 +1013,21 @@ export function ProcessingOperations({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload();
   }, []);
+  useEffect(() => {
+    if (!focusId || !data || appliedFocusId.current === focusId) return;
+    appliedFocusId.current = focusId;
+    const order = data.orders.find((item) => item.id === focusId);
+    if (order) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- restore a direct record link after data loads
+      setTab(order.status === "IN_PROCESS" || order.status === "POSTED" ? "Active Orders" : "Queue");
+      setDetailOrderId(order.id);
+    } else if (data.requests.some((item) => item.id === focusId)) {
+      setTab("Requests");
+      setRequestDetailId(focusId);
+    } else {
+      setTab("Special Jobs");
+    }
+  }, [data, focusId]);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setStateFilter(initialState);
@@ -2568,7 +2586,7 @@ export function ProcessingOperations({
           />
         ))}
 
-      {tab === "Special Jobs" && <SpecialJobs data={data} onChanged={reload} canSubmit={["system_admin", "warehouse_manager", "processing_supervisor"].includes(normalizeAppRole(role))} canApprove={["system_admin", "warehouse_manager"].includes(normalizeAppRole(role))} />}
+      {tab === "Special Jobs" && <SpecialJobs data={data} focusId={focusId} onChanged={reload} canSubmit={["system_admin", "warehouse_manager", "processing_supervisor"].includes(normalizeAppRole(role))} canApprove={["system_admin", "warehouse_manager"].includes(normalizeAppRole(role))} />}
 
       {tab === "Output Lots" && (
         <section className="record-panel">

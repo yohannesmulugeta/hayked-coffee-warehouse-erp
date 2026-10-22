@@ -114,10 +114,10 @@ export async function loadPendingOperationalReviews() {
   const db = createSupabaseClient();
   const [checkResult, jobResult] = await Promise.all([
     db.from("quantity_checks")
-      .select("id,stage,reference_id,expected_kg,measured_kg,expected_bags,measured_bags,evidence_reference,difference_reason,payload,recorded_by,recorded_at")
+      .select("id,stage,reference_id,client_id,expected_kg,measured_kg,expected_bags,measured_bags,evidence_reference,difference_reason,payload,recorded_by,recorded_at")
       .eq("status", "PENDING").order("recorded_at", { ascending: true }),
     db.from("coffee_transform_jobs")
-      .select("id,job_type,input_kg,output_kg,input_bags,output_bags,output_section,evidence_reference,instruction,recorded_by,created_at")
+      .select("id,job_type,client_id,input_kg,output_kg,input_bags,output_bags,output_section,evidence_reference,instruction,recorded_by,created_at")
       .eq("status", "PENDING").order("created_at", { ascending: true }),
   ]);
   if (checkResult.error || jobResult.error) throw new Error(checkResult.error?.message ?? jobResult.error?.message);
@@ -131,7 +131,18 @@ export async function loadPendingOperationalReviews() {
     ? await db.from("coffee_lots").select("id,lot_number").in("id", sources.map((source) => source.lot_id))
     : { data: [], error: null };
   if (lotsResult.error) throw new Error(lotsResult.error.message);
-  return { checks: checkResult.data ?? [], jobs, sources, lots: lotsResult.data ?? [] };
+  const checks = checkResult.data ?? [];
+  const clientIds = [...new Set([...checks.map((item) => item.client_id), ...jobs.map((item) => item.client_id)])];
+  const references = (stages: string[]) => checks.filter((item) => stages.includes(item.stage)).map((item) => item.reference_id);
+  const [clientsResult, receiptsResult, ordersResult, dispatchesResult] = await Promise.all([
+    clientIds.length ? db.from("clients").select("id,legal_name").in("id", clientIds) : Promise.resolve({ data: [], error: null }),
+    references(["ARRIVAL"]).length ? db.from("warehouse_receipts").select("id,receipt_number").in("id", references(["ARRIVAL"])) : Promise.resolve({ data: [], error: null }),
+    references(["PROCESSING_INTAKE", "PROCESSING_OUTPUT"]).length ? db.from("processing_orders").select("id,order_number").in("id", references(["PROCESSING_INTAKE", "PROCESSING_OUTPUT"])) : Promise.resolve({ data: [], error: null }),
+    references(["DISPATCH_EXIT"]).length ? db.from("dispatch_orders").select("id,dispatch_number").in("id", references(["DISPATCH_EXIT"])) : Promise.resolve({ data: [], error: null }),
+  ]);
+  const detailError = [clientsResult, receiptsResult, ordersResult, dispatchesResult].find((item) => item.error)?.error;
+  if (detailError) throw new Error(detailError.message);
+  return { checks, jobs, sources, lots: lotsResult.data ?? [], clients: clientsResult.data ?? [], receipts: receiptsResult.data ?? [], orders: ordersResult.data ?? [], dispatches: dispatchesResult.data ?? [] };
 }
 
 export async function loadLotTrace(lotId: string) {
@@ -171,15 +182,16 @@ export async function loadLotTrace(lotId: string) {
     ...(linkedTransformSources.data ?? []).map((item) => item.lot_id),
   ])];
   const referenceIds = [...new Set(movements.map((item) => item.reference_id))];
-  const [lotsResult, checksResult] = await Promise.all([
+  const [lotsResult, checksResult, ordersResult] = await Promise.all([
     db.from("coffee_lots").select("id,lot_number,section,quantity_kg,bag_count").in("id", relatedLotIds),
     referenceIds.length ? db.from("quantity_checks").select("stage,reference_id,expected_kg,measured_kg,expected_bags,measured_bags,evidence_reference,difference_reason,status,verified_by").in("reference_id", referenceIds) : Promise.resolve({ data: [], error: null }),
+    orderIds.length ? db.from("processing_orders").select("id,order_number").in("id", orderIds) : Promise.resolve({ data: [], error: null }),
   ]);
-  if (lotsResult.error || checksResult.error) throw new Error(lotsResult.error?.message ?? checksResult.error?.message);
+  if (lotsResult.error || checksResult.error || ordersResult.error) throw new Error(lotsResult.error?.message ?? checksResult.error?.message ?? ordersResult.error?.message);
   return {
     movements,
     inputs: linkedInputs.data ?? [], outputs: linkedOutputs.data ?? [],
     transforms: linkedTransforms.data ?? [], transformSources: linkedTransformSources.data ?? [],
-    lots: lotsResult.data ?? [], checks: checksResult.data ?? [],
+    lots: lotsResult.data ?? [], checks: checksResult.data ?? [], orders: ordersResult.data ?? [],
   };
 }

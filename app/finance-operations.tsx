@@ -27,6 +27,8 @@ import {
   type StorageQuote,
 } from "@/lib/erp-data";
 import { daysOverdue } from "./ux-rules";
+import { EmptyBagBilling } from "./empty-bag-billing";
+import { createSupabaseClient } from "@/lib/supabase/client";
 import {
   DetailGrid,
   DetailSection,
@@ -74,8 +76,8 @@ function Status({ value }: { value: string }) {
 const today = new Date().toISOString().slice(0, 10);
 const monthStart = `${today.slice(0, 7)}-01`;
 
-export function FinanceOperations() {
-  const [tab, setTab] = useState<Tab>("Client Accounts");
+export function FinanceOperations({ focusId, initialTab = "Client Accounts" }: { focusId?: string; initialTab?: "Client Accounts" | "Storage Review" }) {
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [message, setMessage] = useState("");
   const [data, setData] = useState<FinanceData | null>(null);
   const [selectedClientId, setSelectedClientId] = useState("");
@@ -146,6 +148,20 @@ export function FinanceOperations() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void reloadFinance();
   }, []);
+
+  useEffect(() => {
+    if (!data || !focusId) return;
+    const invoice = data.invoices.find((item) => item.id === focusId);
+    // Deep links must select the record after finance data finishes loading.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (invoice) { setTab("Invoices"); setInvoiceDetailId(invoice.id); return; }
+    const payment = data.payments.find((item) => item.id === focusId);
+    if (payment) { setTab("Payments"); setSelectedInvoiceId(payment.invoice_id); return; }
+    let active = true;
+    void createSupabaseClient().from("empty_bag_charge_runs").select("client_id").eq("id", focusId).maybeSingle()
+      .then(({ data: charge }) => { if (active && charge) { setBillingClientId(charge.client_id); setTab("Storage Review"); } });
+    return () => { active = false; };
+  }, [data, focusId]);
 
   const clients = data?.clients.filter((item) => item.active) ?? [];
   const clientById = new Map(clients.map((item) => [item.id, item.legal_name]));
@@ -1129,6 +1145,7 @@ export function FinanceOperations() {
         </div>
       )}
 
+      {tab === "Storage Review" && data && <EmptyBagBilling key={billingClientId} data={data} clientId={billingClientId} focusId={focusId} onPosted={reloadFinance} />}
       {tab === "Storage Review" && (
         <div className="storage-layout">
           <section className="storage-controls">

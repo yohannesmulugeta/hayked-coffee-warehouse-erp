@@ -117,11 +117,15 @@ function downloadReport(title: string, csv: string) {
 
 export function ManagementOperations({
   activeView,
+  focusId,
   onNavigate,
+  onReviewsChanged,
   initialReportType = "Stock",
 }: {
   activeView: string;
+  focusId?: string;
   onNavigate?: (intent: { view: string; focusId?: string }) => void;
+  onReviewsChanged?: () => void;
   initialReportType?: ReportType;
 }) {
   const [scopedMessage, setScopedMessage] = useState({ view: "", text: "" });
@@ -336,6 +340,7 @@ export function ManagementOperations({
     }
     try {
       await decideApproval(item.id, decision, decisionNote.trim());
+      onReviewsChanged?.();
       await reloadManagement();
       setDecisionNote("");
       setMessage(
@@ -940,7 +945,7 @@ export function ManagementOperations({
                 <option value="PAYMENT_SLIP">Payment slip</option>
                 <option value="DISPATCH_RELEASE">Dispatch release</option>
                 <option value="CREDIT_APPROVAL">Credit approval</option>
-                <option value="LAB_SOURCE_EVIDENCE">Laboratory source evidence</option>
+                {process.env.NEXT_PUBLIC_LAB_DATABASE_ENABLED === "true" && <option value="LAB_SOURCE_EVIDENCE">Laboratory source evidence</option>}
                 <option value="SUPPORTING_DOCUMENT">Supporting document</option>
               </select>
             </label>
@@ -1015,7 +1020,7 @@ export function ManagementOperations({
 
       {activeView === "Approvals" && (
         <>
-          <OperationalApprovalQueue />
+          <OperationalApprovalQueue focusId={focusId} onNavigate={onNavigate} onChanged={onReviewsChanged} />
           <div className="document-rule">
             <ShieldCheck size={19} />
             <div>

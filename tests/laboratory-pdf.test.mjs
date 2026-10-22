@@ -2,6 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PDFDocument } from "pdf-lib";
 import { renderLaboratoryPdf } from "../lib/laboratory-pdf.ts";
+import { laboratoryGrades, validLaboratoryGrade } from "../lib/laboratory-fields.ts";
+
+test("grades follow the selected coffee category", () => {
+  assert.deepEqual(laboratoryGrades("Washed"), ["Grade 1", "Grade 2", "Grade 3", "Grade 4", "Grade 5"]);
+  assert.deepEqual(laboratoryGrades("Natural"), laboratoryGrades("Washed"));
+  assert.deepEqual(laboratoryGrades("UG"), ["UG"]);
+  assert.equal(validLaboratoryGrade("Natural", "UG"), false);
+  assert.equal(validLaboratoryGrade("UG", "Grade 5"), false);
+});
 
 const snapshot = {
   sample_code: "LAB-2026-000001", client_name: "Guji Specialty Coffee PLC", received_on: "2026-10-20",
@@ -10,7 +19,7 @@ const snapshot = {
   green_quality: "Poor to fair", green_comment: "Physical defects observed.",
   cup_cleanliness: "Clean", acidity: "Light", body: "Thin", flavour: "Fair", cup_overall: "Fair",
   cup_comment: "All cups were assessed.", green_value: 11, cup_value: 16, total_value: 27,
-  proposed_grade: "UG", recommendation: "Review physical defects.", reviewer_name: "Reviewer Name",
+  proposed_grade: "Grade 5", recommendation: "Review physical defects.", reviewer_name: "Reviewer Name",
   approved_at: "2026-10-20T08:00:00Z",
 };
 

@@ -93,9 +93,11 @@ function Empty({ title, copy }: { title: string; copy: string }) {
 
 export function DispatchOperations({
   activeView,
+  focusId,
   onNavigate,
 }: {
   activeView: string;
+  focusId?: string;
   onNavigate?: (intent: { view: string; reportType?: "Dispatch" }) => void;
 }) {
   const [tab, setTab] = useState<Tab>("New dispatch");
@@ -174,6 +176,12 @@ export function DispatchOperations({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload();
   }, []);
+  useEffect(() => {
+    if (!focusId || !data?.dispatches.some((item) => item.id === focusId)) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- restore a direct record link after data loads
+    setSelectedDispatchId(focusId);
+    setTab("Dispatches");
+  }, [data, focusId]);
 
   const clients = data?.clients ?? [];
   const lots = data?.lots ?? [];

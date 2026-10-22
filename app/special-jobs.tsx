@@ -12,7 +12,7 @@ type SourceDraft = { key: number; lotId: string; bags: number; kg: number };
 let nextKey = 1;
 const blankSource = (): SourceDraft => ({ key: nextKey++, lotId: "", bags: 0, kg: 0 });
 
-export function SpecialJobs({ data, onChanged, canSubmit, canApprove }: { data: ProcessingData | null; onChanged: () => Promise<void>; canSubmit: boolean; canApprove: boolean }) {
+export function SpecialJobs({ data, focusId, onChanged, canSubmit, canApprove }: { data: ProcessingData | null; focusId?: string; onChanged: () => Promise<void>; canSubmit: boolean; canApprove: boolean }) {
   const [type, setType] = useState<"REBAG" | "BLEND">("REBAG");
   const [clientId, setClientId] = useState("");
   const [sources, setSources] = useState<SourceDraft[]>([blankSource()]);
@@ -36,6 +36,14 @@ export function SpecialJobs({ data, onChanged, canSubmit, canApprove }: { data: 
   const sourceKg = sources.reduce((sum, source) => sum + source.kg, 0);
   const sourceBags = sources.reduce((sum, source) => sum + source.bags, 0);
   const lotById = new Map((data?.lots ?? []).map((lot) => [lot.id, lot]));
+  const sourceInvalid = sources.some((source) => {
+    const lot = lotById.get(source.lotId);
+    return Boolean(lot && (source.kg > Number(lot.quantity_kg) || source.bags > lot.bag_count));
+  });
+
+  useEffect(() => {
+    if (focusId && jobs.some((job) => job.id === focusId)) document.getElementById(`special-job-${focusId}`)?.scrollIntoView({ block: "center" });
+  }, [focusId, jobs]);
 
   async function reload() {
     const next = await loadTransformJobs();
@@ -63,6 +71,7 @@ export function SpecialJobs({ data, onChanged, canSubmit, canApprove }: { data: 
     if ((type === "REBAG" && sources.length !== 1) || (type === "BLEND" && sources.length < 2)
       || sources.some((source) => !source.lotId || source.bags <= 0 || source.kg <= 0)
       || new Set(sources.map((source) => source.lotId)).size !== sources.length
+      || sourceInvalid
       || Math.round(sourceKg * 1000) !== Math.round(outputKg * 1000)) {
       setMessage("Select distinct source lots and enter measured quantities. Input and output kilograms must match.");
       return;
@@ -112,6 +121,7 @@ export function SpecialJobs({ data, onChanged, canSubmit, canApprove }: { data: 
         <label>Source {index + 1}<select required value={source.lotId} onChange={(event) => updateSource(source.key, { lotId: event.target.value })}><option value="">Select lot</option>{eligibleLots.map((lot) => <option key={lot.id} value={lot.id} disabled={sources.some((other) => other.key !== source.key && other.lotId === lot.id)}>{lot.lot_number} · {Number(lot.quantity_kg).toLocaleString()} kg / {lot.bag_count} bags</option>)}</select></label>
         <label>Counted bags<input type="number" min="1" required value={source.bags || ""} onChange={(event) => updateSource(source.key, { bags: Number(event.target.value) })} /></label>
         <label>Weighed kg<input type="number" min="0.001" step="0.001" required value={source.kg || ""} onChange={(event) => updateSource(source.key, { kg: Number(event.target.value) })} /></label>
+        {source.lotId && <p className="source-balance">Available: {Number(lotById.get(source.lotId)?.quantity_kg ?? 0).toLocaleString()} kg / {lotById.get(source.lotId)?.bag_count ?? 0} bags · After job: {(Number(lotById.get(source.lotId)?.quantity_kg ?? 0) - source.kg).toLocaleString()} kg / {(lotById.get(source.lotId)?.bag_count ?? 0) - source.bags} bags</p>}
         {type === "BLEND" && sources.length > 2 && <button type="button" className="secondary-button" onClick={() => setSources((current) => current.filter((item) => item.key !== source.key))}>Remove</button>}
       </div>)}
       {type === "BLEND" && <button type="button" className="secondary-button" onClick={() => setSources((current) => [...current, blankSource()])}>Add source lot</button>}
@@ -124,13 +134,15 @@ export function SpecialJobs({ data, onChanged, canSubmit, canApprove }: { data: 
         <label className="wide">Job instruction / reason<textarea required minLength={5} value={instruction} onChange={(event) => setInstruction(event.target.value)} /></label>
       </div>
       <p>Source: {sourceBags} bags / {sourceKg.toLocaleString()} kg · Output: {outputBags} bags / {outputKg.toLocaleString()} kg · Difference: {(sourceKg - outputKg).toLocaleString()} kg</p>
-      <button type="submit" className="primary-button" disabled={busy || Math.round(sourceKg * 1000) !== Math.round(outputKg * 1000)}>Send job for approval</button>
+      {sourceInvalid && <p className="request-form-error" role="alert">A source exceeds its available kg or bag balance. Reduce the measured amount before submitting.</p>}
+      <button type="submit" className="primary-button" disabled={busy || sourceInvalid || Math.round(sourceKg * 1000) !== Math.round(outputKg * 1000)}>Send job for approval</button>
       <p className="form-note">Blending (ሳቢያ) uses two or more measured source lots and creates one traceable output lot.</p>
     </form>}
     <section className="record-panel"><h2>Special job history</h2>
       {jobs.length === 0 && <p>No rebagging or blending jobs recorded.</p>}
-      {jobs.map((job) => <article className="special-job-card" key={job.id}>
-        <h3>{job.job_type} · {job.id.slice(0, 8)} · {job.status}</h3>
+      {jobs.map((job) => <article className={`special-job-card ${job.id === focusId ? "focused-charge" : ""}`} id={`special-job-${job.id}`} key={job.id}>
+        <h3>{job.job_type === "BLEND" ? "Blending" : "Rebagging"} · {job.evidence_reference} · {job.status}</h3>
+        <p>{data?.clients.find((client) => client.id === job.client_id)?.legal_name ?? "Client record unavailable"} · {new Date(job.created_at).toLocaleString()}</p>
         <p>Sources: {savedSources.filter((source) => source.job_id === job.id).map((source) => `${lotById.get(source.lot_id)?.lot_number ?? source.lot_id.slice(0, 8)} ${Number(source.input_kg).toLocaleString()} kg`).join(" + ")}</p>
         <p>{job.input_bags} bags / {Number(job.input_kg).toLocaleString()} kg → {job.output_bags} bags / {Number(job.output_kg).toLocaleString()} kg at {job.output_section}</p>
         <p>Evidence: {job.evidence_reference} · {job.instruction}{job.output_lot_id ? ` · Output lot: ${lotById.get(job.output_lot_id)?.lot_number ?? job.output_lot_id}` : ""}</p>
