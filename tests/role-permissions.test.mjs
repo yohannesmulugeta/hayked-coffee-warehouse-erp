@@ -41,6 +41,14 @@ test("processing actions are role-aware and system administrators can perform ev
     assert.equal(permissions.canPerformProcessingAction("system_admin", action), true, action);
     assert.equal(permissions.canPerformProcessingAction("warehouse_officer", action), false, action);
   }
+  for (const role of ["production_assistant", "production_assistant_weighbridge"]) {
+    assert.equal(permissions.canPerformProcessingAction(role, "create"), true);
+    for (const action of ["approve", "queue", "start", "complete"]) {
+      assert.equal(permissions.canPerformProcessingAction(role, action), false, `${role}: ${action}`);
+    }
+  }
+  assert.equal(canAccessView("production_assistant", "Dispatch"), false);
+  assert.equal(canAccessView("production_assistant_weighbridge", "Dispatch"), true);
 });
 
 test("laboratory is visible to staff without granting edit rights through navigation", () => {
@@ -52,14 +60,17 @@ test("laboratory is visible to staff without granting edit rights through naviga
 
 test("database role defaults match navigation and every assignable view is catalogued", () => {
   const migration = readFileSync(new URL("../supabase/migrations/20261022073724_user_feature_access.sql", import.meta.url), "utf8");
+  const assistantMigration = readFileSync(new URL("../supabase/migrations/20261027213713_production_assistant_access.sql", import.meta.url), "utf8");
   for (const view of permissions.configurableViews) {
     assert.ok(migration.includes(`('${view}', true)`), `${view} is absent from the database catalog`);
   }
   for (const role of permissions.appRoles) {
     if (role === "system_admin") continue;
     const match = migration.match(new RegExp(`select '${role}', unnest\\(array\\[([\\s\\S]*?)\\]\\);`));
-    assert.ok(match, `${role} defaults are missing`);
-    const databaseViews = [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
+    const databaseViews = match
+      ? [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1])
+      : [...assistantMigration.matchAll(new RegExp(`\\('${role}', '([^']+)'\\)`, "g"))].map((item) => item[1]);
+    assert.ok(databaseViews.length, `${role} defaults are missing`);
     for (const view of ["Dashboard", ...permissions.configurableViews, "Administration"]) {
       assert.equal(databaseViews.includes(view), canAccessView(role, view), `${role}: ${view}`);
     }

@@ -6,6 +6,12 @@ For each feature, choose **Use role default**, **Allow reading**, or **Deny read
 
 **Administration** cannot be granted as an individual feature. Only an active `system_admin` can manage accounts or feature overrides. At least one active system administrator must remain. Suspending a user blocks database access immediately; the app signs out an open session when it next checks access. New Auth-created profiles start inactive until the administrator's account creation flow completes.
 
+## Production trial roles
+
+The `production_assistant` role can create and submit processing requests and record processing quantity checks. It cannot approve requests or checks, queue, start or complete processing, or post stock. `production_assistant_weighbridge` has the same production access and can also record an outgoing weighbridge reference on an unapproved dispatch. That action cannot change document readiness, notes, stock, or approval. A Production Officer uses the existing `processing_supervisor` role. Warehouse Manager and Warehouse Officer use the existing warehouse roles.
+
+For trial accounts, use the job title as the display name. When real employees begin working, create accounts under their own identities and deactivate trial accounts so audit history stays attributable to the person who performed the action.
+
 ## Verify a change
 
 1. As a system administrator, select the staff user and save the role and Active status first.

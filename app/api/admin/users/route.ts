@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 
-const roles = new Set(["system_admin", "warehouse_manager", "warehouse_officer", "processing_supervisor", "finance_officer", "auditor", "viewer"]);
+const roles = new Set(["system_admin", "warehouse_manager", "warehouse_officer", "processing_supervisor", "production_assistant", "production_assistant_weighbridge", "finance_officer", "auditor", "viewer"]);
 
 export async function POST(request: Request) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

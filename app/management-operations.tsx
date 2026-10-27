@@ -66,6 +66,8 @@ const roles = [
   "warehouse_manager",
   "warehouse_officer",
   "processing_supervisor",
+  "production_assistant",
+  "production_assistant_weighbridge",
   "finance_officer",
   "auditor",
   "viewer",

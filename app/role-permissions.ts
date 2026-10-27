@@ -3,6 +3,8 @@ export const appRoles = [
   "warehouse_manager",
   "warehouse_officer",
   "processing_supervisor",
+  "production_assistant",
+  "production_assistant_weighbridge",
   "finance_officer",
   "auditor",
   "viewer",
@@ -34,6 +36,8 @@ const viewAccess: Record<AppRole, ReadonlySet<string>> = {
     "Dashboard", "Clients", "Coffee Lots", "Processing", "Laboratory", "Labour", "Reports",
     "Approvals", "Storage Loss", "Generator Requests", "Documents",
   ]),
+  production_assistant: new Set(["Dashboard", "Clients", "Coffee Lots", "Processing", "Documents"]),
+  production_assistant_weighbridge: new Set(["Dashboard", "Clients", "Coffee Lots", "Processing", "Dispatch", "Documents"]),
   finance_officer: new Set([
     "Dashboard", "Clients", "Coffee Lots", "Laboratory", "Finance", "Reports", "Approvals",
     "Agreements", "Documents", "Audit History", "Arrears Cases",
@@ -64,6 +68,8 @@ const processingActionAccess: Record<string, ReadonlySet<ProcessingAction>> = {
   system_admin: new Set(["create", "approve", "queue", "start", "complete"]),
   warehouse_manager: new Set(["create", "approve", "queue", "start", "complete"]),
   processing_supervisor: new Set(["create", "approve", "queue", "start", "complete"]),
+  production_assistant: new Set(["create"]),
+  production_assistant_weighbridge: new Set(["create"]),
 };
 
 export function canPerformProcessingAction(role: string, action: ProcessingAction) {
