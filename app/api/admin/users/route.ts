@@ -4,16 +4,21 @@ const roles = new Set(["system_admin", "warehouse_manager", "warehouse_officer",
 
 export async function POST(request: Request) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) return Response.json({ error: "Server-side Supabase administration is not configured." }, { status: 503 });
+  if (!url || !publishableKey || !serviceKey) return Response.json({ error: "Server-side Supabase administration is not configured." }, { status: 503 });
 
   const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (!token) return Response.json({ error: "Sign in as a system administrator." }, { status: 401 });
 
-  const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
-  const { data: authData, error: authError } = await admin.auth.getUser(token);
+  const staff = createClient(url, publishableKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  const { data: authData, error: authError } = await staff.auth.getUser(token);
   if (authError || !authData.user) return Response.json({ error: "Your session is not valid." }, { status: 401 });
-  const { data: profile } = await admin.from("profiles").select("role,active").eq("id", authData.user.id).maybeSingle();
+  const { data: profile, error: profileError } = await staff.from("profiles").select("role,active").eq("id", authData.user.id).maybeSingle();
+  if (profileError) return Response.json({ error: "Your staff profile could not be checked." }, { status: 503 });
   if (!profile?.active || profile.role !== "system_admin") return Response.json({ error: "Only an active system administrator can create users." }, { status: 403 });
 
   const body = await request.json() as { email?: string; fullName?: string; role?: string; password?: string };
@@ -23,6 +28,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Enter a valid email, full name, role, and temporary password of at least 10 characters." }, { status: 400 });
   }
 
+  const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
   const created = await admin.auth.admin.createUser({ email, password: body.password, email_confirm: true, user_metadata: { full_name: fullName } });
   if (created.error || !created.data.user) return Response.json({ error: created.error?.message ?? "User account could not be created." }, { status: 400 });
   const updated = await admin.from("profiles").update({ full_name: fullName, role: body.role, active: true }).eq("id", created.data.user.id).select("id").maybeSingle();
