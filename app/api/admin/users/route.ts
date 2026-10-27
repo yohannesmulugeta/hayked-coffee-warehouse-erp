@@ -31,10 +31,14 @@ export async function POST(request: Request) {
   const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
   const created = await admin.auth.admin.createUser({ email, password: body.password, email_confirm: true, user_metadata: { full_name: fullName } });
   if (created.error || !created.data.user) return Response.json({ error: created.error?.message ?? "User account could not be created." }, { status: 400 });
-  const updated = await admin.from("profiles").update({ full_name: fullName, role: body.role, active: true }).eq("id", created.data.user.id).select("id").maybeSingle();
-  if (updated.error || !updated.data) {
+  const updated = await staff.rpc("update_admin_profile", {
+    p_profile_id: created.data.user.id,
+    p_role: body.role,
+    p_active: true,
+  });
+  if (updated.error) {
     await admin.auth.admin.deleteUser(created.data.user.id);
-    return Response.json({ error: updated.error?.message ?? "The staff profile was not created." }, { status: 400 });
+    return Response.json({ error: updated.error.message }, { status: 400 });
   }
   return Response.json({ id: created.data.user.id }, { status: 201 });
 }
