@@ -136,9 +136,9 @@ export function WarehouseControls({
   const [labourOrderId, setLabourOrderId] = useState("");
   const [labourLotId, setLabourLotId] = useState("");
   const [labourActivity, setLabourActivity] = useState("Bag handling");
-  const [labourQuantity, setLabourQuantity] = useState(100);
+  const [labourQuantity, setLabourQuantity] = useState<number | "">("");
   const [labourUnit, setLabourUnit] = useState("bags");
-  const [labourInternal, setLabourInternal] = useState(750);
+  const [labourInternal, setLabourInternal] = useState<number | "">("");
   const [labourNote, setLabourNote] = useState("");
   const [labourReference, setLabourReference] = useState("");
 
@@ -266,7 +266,9 @@ export function WarehouseControls({
     ) ?? [];
   const labourSetting = data?.labourSettings.find((item) => item.active && item.effective_from <= labourDate && (!item.effective_to || item.effective_to >= labourDate));
   const labourAddition = Number(labourSetting?.fixed_addition_etb ?? 0);
-  const labourCharge = calculateLabourCharge(labourInternal, labourAddition);
+  const labourCharge = labourInternal === ""
+    ? { valid: false, clientChargeEtb: 0 }
+    : calculateLabourCharge(labourInternal, labourAddition);
   const labourOrders =
     data?.processingOrders.filter(
       (item) => item.client_id === labourClientId,
@@ -426,8 +428,15 @@ export function WarehouseControls({
 
   async function addLabour(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!labourClientId || !labourSetting || !labourCharge.valid) {
-      setMessage("Select a client and enter a valid internal labour cost.");
+    if (!labourSetting) {
+      setMessage("Labour recording is unavailable until Finance configures the rate.");
+      return;
+    }
+    if (
+      !labourClientId || labourQuantity === "" ||
+      labourQuantity <= 0 || labourInternal === "" || !labourCharge.valid
+    ) {
+      setMessage("Select a client and enter the actual quantity and approved internal labour cost.");
       return;
     }
     try {
@@ -456,6 +465,8 @@ export function WarehouseControls({
       );
       setLabourNote("");
       setLabourReference("");
+      setLabourQuantity("");
+      setLabourInternal("");
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -1085,7 +1096,6 @@ export function WarehouseControls({
           label="COST CONTROL"
           title="Labour & Services"
           copy="Choose one task, record it, then use History to search previous work."
-          onReports={() => onNavigate?.({ view: "Reports" })}
         />
         {notice}
         <section className="service-workspace-tabs" role="tablist" aria-label="Labour and service workspaces">
@@ -1142,18 +1152,6 @@ export function WarehouseControls({
         )}
         {activeServiceTab === "LABOUR" && (
         <>
-        <div className="tariff-warning">
-          <AlertTriangle size={18} />
-          <div>
-            <strong>
-              {labourSetting ? `Configured labour addition: ETB ${labourAddition.toLocaleString()}` : "Labour addition is not configured. Finance must configure the rate before recording a charge."}
-            </strong>
-            <p>
-              This is the current demo default, not a confirmed production
-              markup. New records copy it so historical charges remain stable.
-            </p>
-          </div>
-        </div>
         <section className="grn-summary labour-flow-summary">
           <article><UsersRound size={18} /><span>1. Hayked cost<strong>Internal record</strong><small>This is a cost record, not proof that a worker was paid.</small></span></article>
           <article><Banknote size={18} /><span>2. Client charge<strong>Unbilled service</strong><small>Finance reviews it before adding it to an invoice.</small></span></article>
@@ -1165,11 +1163,16 @@ export function WarehouseControls({
               <div>
                 <h2>Record labour activity</h2>
                 <p>
-                  Creates an internal cost record and one unbilled client
-                  service event.
+                  Example: choose the client and activity, enter the actual bags
+                  handled, and add the job reference. Use only an approved cost.
                 </p>
               </div>
             </header>
+            {!labourSetting && (
+              <p className="form-note" role="status">
+                Labour recording is unavailable until Finance configures the rate.
+              </p>
+            )}
             <div className="control-fields">
               <label>
                 Work date
@@ -1248,12 +1251,14 @@ export function WarehouseControls({
                 Quantity
                 <input
                   type="number"
+                  required
                   min="0.001"
                   step="0.001"
                   value={labourQuantity}
-                  onChange={(event) =>
-                    setLabourQuantity(Number(event.target.value))
-                  }
+                  onChange={(event) => setLabourQuantity(
+                    event.target.value === "" ? "" : Number(event.target.value)
+                  )}
+                  placeholder="Example: 100"
                 />
               </label>
               <label>
@@ -1268,12 +1273,14 @@ export function WarehouseControls({
                 Hayked internal labour cost (ETB)
                 <input
                   type="number"
+                  required
                   min="0"
                   step="0.01"
                   value={labourInternal}
-                  onChange={(event) =>
-                    setLabourInternal(Number(event.target.value))
-                  }
+                  onChange={(event) => setLabourInternal(
+                    event.target.value === "" ? "" : Number(event.target.value)
+                  )}
+                  placeholder="Enter approved cost"
                 />
               </label>
               <label>
@@ -1296,7 +1303,9 @@ export function WarehouseControls({
             <div className="labour-charge-preview">
               <div>
                 <span>Hayked cost record</span>
-                <strong>ETB {labourInternal.toLocaleString()}</strong>
+                <strong>
+                  {labourInternal === "" ? "Enter cost" : `ETB ${labourInternal.toLocaleString()}`}
+                </strong>
               </div>
               <span>+</span>
               <div>
@@ -1307,14 +1316,14 @@ export function WarehouseControls({
               <div>
                 <span>Client charge to review</span>
                 <strong>
-                  ETB {labourCharge.clientChargeEtb.toLocaleString()}
+                  {labourCharge.valid ? `ETB ${labourCharge.clientChargeEtb.toLocaleString()}` : "Pending cost"}
                 </strong>
               </div>
             </div>
             <button
               className="primary-button"
               type="submit"
-              disabled={!labourClientId || !labourSetting || !labourCharge.valid}
+              disabled={!labourClientId || !labourSetting || labourQuantity === "" || labourQuantity <= 0 || !labourCharge.valid}
             >
               <Plus size={16} />
               Record labour and service event
